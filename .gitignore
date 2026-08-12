@@ -1,0 +1,22 @@
+# Generated data and warehouses — rebuilt by `make data` / `make build`
+data/*.csv
+warehouse*.duckdb
+
+# Environments
+.venv*/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Console dependencies and build output — restored by `make web-install` from
+# the committed package-lock.json, which is the pinned artefact, not the tree.
+web/node_modules/
+web/dist/
+
+# Local tooling state
+.streamlit/
+.claude/settings.local.json
+
+# NOT ignored, deliberately: sql/, docs/, observability/grafana/, keycloak/.
+# Dashboards, realms and metric definitions are provisioned from version control,
+# never hand-edited in a running instance.

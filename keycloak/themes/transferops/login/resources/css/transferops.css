@@ -1,0 +1,354 @@
+:root {
+  --transferops-bg: #f7f8f8;
+  --transferops-surface: #ffffff;
+  --transferops-text: #202526;
+  --transferops-muted: #566164;
+  --transferops-border: #d8ddde;
+  --transferops-primary: #0b8f83;
+  --transferops-primary-hover: #08766d;
+  --transferops-focus: #25a99d;
+  --transferops-danger: #b42318;
+}
+
+.pf-v5-theme-dark {
+  --transferops-bg: #111718;
+  --transferops-surface: #182021;
+  --transferops-text: #f1f5f4;
+  --transferops-muted: #a9b5b3;
+  --transferops-border: #344141;
+  --transferops-primary: #45c6b8;
+  --transferops-primary-hover: #63d5c9;
+  --transferops-focus: #63d5c9;
+  --transferops-danger: #ff8a80;
+}
+
+html,
+body,
+body#keycloak-bg {
+  min-height: 100%;
+  margin: 0;
+  background: var(--transferops-bg) !important;
+  color: var(--transferops-text);
+  font-family: "IBM Plex Sans", Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+.pf-v5-c-login,
+.pf-v5-c-login__container {
+  min-height: 100vh;
+  background: transparent !important;
+}
+
+.pf-v5-c-login {
+  display: block !important;
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.pf-v5-c-login__container {
+  display: grid !important;
+  grid-template-rows: 54px 1fr !important;
+  grid-template-columns: 1fr !important;
+  grid-template-areas:
+    "header"
+    "main" !important;
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+#kc-header.pf-v5-c-login__header {
+  position: relative;
+  z-index: 2;
+  display: flex !important;
+  grid-area: header !important;
+  align-self: stretch !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  width: 100% !important;
+  height: 54px !important;
+  min-height: 54px !important;
+  max-height: 54px !important;
+  box-sizing: border-box;
+  margin: 0 !important;
+  padding: 0 20px !important;
+  padding-block: 0 !important;
+  padding-inline: 20px !important;
+  border-bottom: 1px solid var(--transferops-border);
+  background: color-mix(in srgb, var(--transferops-surface) 94%, transparent);
+  color: var(--transferops-text);
+}
+
+#kc-header-wrapper.pf-v5-c-brand {
+  position: relative;
+  display: block !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 0 0 23px !important;
+  padding-block: 0 !important;
+  padding-inline: 23px 0 !important;
+  color: var(--transferops-text) !important;
+  font-size: 14px !important;
+  font-weight: 650 !important;
+  letter-spacing: normal !important;
+  line-height: 18px !important;
+  text-transform: none !important;
+  white-space: nowrap !important;
+}
+
+#kc-header-wrapper::before {
+  position: absolute;
+  left: 0;
+  color: var(--transferops-primary);
+  content: "⌁";
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 14px;
+}
+
+.transferops-theme-toggle {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--transferops-border);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--transferops-text);
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.transferops-theme-toggle:hover {
+  background: color-mix(in srgb, var(--transferops-primary) 8%, transparent);
+}
+
+.pf-v5-c-login__main {
+  display: block !important;
+  align-self: center;
+  justify-self: center;
+  grid-area: main !important;
+  width: min(400px, calc(100vw - 40px));
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 42px 8px 80px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--transferops-text);
+}
+
+.transferops-form-brand {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) 104px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 36px;
+  color: var(--transferops-text);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.transferops-mark {
+  color: var(--transferops-primary);
+  font-size: 22px;
+  font-weight: 400;
+}
+
+.transferops-form-brand strong {
+  font-weight: 700;
+}
+
+.transferops-section {
+  color: var(--transferops-muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+.pf-v5-c-login__main-header,
+.pf-v5-c-login__main-body,
+#kc-form-wrapper,
+#kc-info,
+#kc-info-wrapper {
+  width: 100% !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+.pf-v5-c-login__main-header,
+.pf-v5-c-login__main-body {
+  display: block !important;
+  grid-template-columns: none !important;
+  max-width: none !important;
+}
+
+#kc-page-title {
+  display: block !important;
+  width: 100% !important;
+  margin: 0 !important;
+  color: var(--transferops-text) !important;
+  font-size: 20px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.015em;
+  line-height: 1.25 !important;
+  overflow-wrap: normal;
+  white-space: normal;
+  word-break: normal;
+}
+
+.transferops-subtitle {
+  display: block;
+  width: 100%;
+  margin: 6px 0 26px;
+  color: var(--transferops-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.pf-v5-c-form,
+#kc-form-login,
+#kc-register-form,
+#kc-reset-password-form {
+  display: grid;
+  gap: 14px;
+}
+
+.pf-v5-c-form__group,
+.form-group {
+  margin: 0 !important;
+}
+
+label,
+.pf-v5-c-form__label,
+.pf-v5-c-form__label-text {
+  color: var(--transferops-text) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+.pf-v5-c-form-control {
+  width: 100%;
+  min-height: 38px !important;
+  box-sizing: border-box;
+  border: 1px solid var(--transferops-border) !important;
+  border-radius: 2px !important;
+  background: transparent !important;
+  color: var(--transferops-text) !important;
+  box-shadow: none !important;
+  font-size: 14px !important;
+}
+
+input:focus,
+.pf-v5-c-form-control:focus-within {
+  border-color: var(--transferops-focus) !important;
+  outline: 2px solid color-mix(in srgb, var(--transferops-focus) 22%, transparent) !important;
+  outline-offset: 1px;
+}
+
+.pf-v5-c-input-group,
+.pf-v5-c-input-group__item {
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.pf-v5-c-button.pf-m-primary,
+#kc-login,
+input[type="submit"] {
+  width: 100%;
+  min-height: 38px;
+  margin-top: 0 !important;
+  border: 1px solid var(--transferops-primary) !important;
+  border-radius: 2px !important;
+  background: var(--transferops-primary) !important;
+  color: var(--transferops-surface) !important;
+  box-shadow: none !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+
+.pf-v5-c-button.pf-m-primary:hover,
+#kc-login:hover,
+input[type="submit"]:hover {
+  border-color: var(--transferops-primary-hover) !important;
+  background: var(--transferops-primary-hover) !important;
+}
+
+a,
+.pf-v5-c-button.pf-m-link {
+  color: var(--transferops-text) !important;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+a:hover,
+.pf-v5-c-button.pf-m-link:hover {
+  color: var(--transferops-primary) !important;
+  text-decoration: underline;
+}
+
+#kc-form-options,
+#kc-registration,
+#kc-info {
+  margin-top: 12px !important;
+  color: var(--transferops-muted);
+  font-size: 12px;
+}
+
+#kc-registration span,
+#kc-info-wrapper {
+  color: var(--transferops-muted) !important;
+  font-size: 12px;
+}
+
+.pf-v5-c-alert {
+  margin: 0 0 18px !important;
+  border-radius: 2px !important;
+  font-size: 12px;
+}
+
+.pf-v5-c-alert.pf-m-danger {
+  border-color: color-mix(in srgb, var(--transferops-danger) 35%, transparent);
+  color: var(--transferops-danger);
+}
+
+.pf-v5-c-login__main-footer,
+.pf-v5-c-login__footer,
+#kc-social-providers {
+  display: none !important;
+}
+
+@media (max-width: 520px) {
+  #kc-header {
+    padding: 0 14px;
+  }
+
+  #kc-header-wrapper.pf-v5-c-brand {
+    max-width: calc(100vw - 74px) !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pf-v5-c-login__main {
+    align-self: start;
+    padding-top: 52px !important;
+  }
+
+  .transferops-form-brand {
+    grid-template-columns: 14px 1fr;
+  }
+
+  .transferops-section {
+    display: none;
+  }
+}

@@ -1,0 +1,29 @@
+# Transfer & Conversion Intelligence Platform scrape configuration.
+#
+# metrics_path is non-default on purpose: in this platform `/metrics/*` already
+# means governed business KPIs, so telemetry is served from /observability/metrics
+# and Prometheus is pointed at it explicitly.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Alerting rules are provisioned from version control, never authored in a
+# running instance -- the same rule the metric layer and the Grafana dashboard
+# follow. What each rule is for is argued in the file itself.
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: transferops-api
+    metrics_path: /observability/metrics
+    static_configs:
+      - targets: ["host.docker.internal:8000"]
+        labels:
+          service: analytics-api
+
+  - job_name: transferops-agent
+    metrics_path: /observability/metrics
+    static_configs:
+      - targets: ["host.docker.internal:8100"]
+        labels:
+          service: assistant

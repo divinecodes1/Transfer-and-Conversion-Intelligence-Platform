@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Governed transfer-project analytics, reporting, and AI decision support.">
+  <title>Transfer Intelligence Platform</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%230A8276'/><path d='M4 5h8M8 5v7' stroke='white' stroke-width='1.5'/></svg>">
+</head>
+<body>
+<header class="topbar">
+  <button class="wordmark nav-home" data-view="overview" aria-label="Transfer Intelligence dashboard">
+    <span class="brand-word"><span>In</span>fineon</span>
+    <span class="platform-name">Transfer Intelligence Platform</span>
+  </button>
+  <div class="topbar-right">
+    <span class="connection-pill" id="connection-status"><span class="dot good"></span> Live</span>
+    <div class="field user-field">
+      <label for="f-user">Viewing as</label>
+      <select id="f-user"></select>
+    </div>
+    <button class="icon-btn" id="theme" title="Switch theme" aria-label="Switch theme"><span class="theme-glyph" aria-hidden="true"></span></button>
+  </div>
+</header>
+
+<div class="app-frame">
+  <aside class="sidenav">
+    <nav class="primary-nav" aria-label="Primary navigation">
+      <button data-view="overview" aria-current="page"><span class="nav-symbol">D</span><span>Dashboard</span></button>
+      <button data-view="projects"><span class="nav-symbol">P</span><span>Projects</span></button>
+      <button data-view="analytics"><span class="nav-symbol">M</span><span>Metrics</span></button>
+      <button data-view="reports"><span class="nav-symbol">R</span><span>Reports</span></button>
+      <button data-view="ask"><span class="nav-symbol">AI</span><span>AI Insight</span></button>
+      <button data-view="operations" id="operations-nav"><span class="nav-symbol">O</span><span>Operations</span></button>
+    </nav>
+    <div class="sidenav-foot">
+      <span class="side-accent"></span>
+      <div><strong>Transfer &amp; Conversion</strong><small>Governed reporting workspace</small></div>
+    </div>
+  </aside>
+
+  <section class="workspace">
+    <div class="filters" id="filters">
+      <div class="field">
+        <label for="f-year">Fiscal year</label>
+        <select id="f-year"></select>
+      </div>
+      <div class="field">
+        <label for="f-type">Transfer type</label>
+        <select id="f-type"></select>
+      </div>
+      <div class="field">
+        <label for="f-portfolio">Portfolio</label>
+        <select id="f-portfolio"></select>
+      </div>
+      <div class="field">
+        <label for="f-site">Site</label>
+        <select id="f-site"></select>
+      </div>
+      <div class="field">
+        <label for="f-complexity">Complexity</label>
+        <select id="f-complexity"></select>
+      </div>
+      <button class="text-btn" id="clear-filters">Clear filters</button>
+      <div class="spacer"></div>
+      <div class="vintage" id="vintage"></div>
+    </div>
+    <main id="app" tabindex="-1"></main>
+  </section>
+</div>
+
+<button class="assistant-launcher" id="assistant-launcher" aria-controls="assistant-panel" aria-expanded="false">
+  <span aria-hidden="true">AI</span><span>Ask Transfer &amp; Conversion Intelligence Platform</span>
+</button>
+<aside class="assistant-panel" id="assistant-panel" aria-hidden="true" aria-label="Transfer &amp; Conversion Intelligence Platform assistant">
+  <header>
+    <div><strong>Transfer &amp; Conversion Intelligence Platform AI</strong><span>Governed portfolio analyst</span></div>
+    <button class="icon-btn" id="assistant-close" aria-label="Close assistant">&times;</button>
+  </header>
+  <div class="assistant-messages" id="assistant-messages" aria-live="polite">
+    <div class="message assistant">Ask about cycle time, schedule drift, forecast accuracy, throughput, or projects behind baseline.</div>
+  </div>
+  <form class="assistant-form" id="assistant-form">
+    <label class="sr-only" for="assistant-input">Question</label>
+    <textarea id="assistant-input" rows="3" maxlength="500" placeholder="Ask a portfolio question..."></textarea>
+    <button class="primary-btn" type="submit">Send</button>
+  </form>
+</aside>
+
+<div id="tip" role="tooltip"></div>
+<script src="/static/charts.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

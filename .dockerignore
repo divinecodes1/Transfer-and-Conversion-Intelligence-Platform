@@ -1,0 +1,48 @@
+# Everything here is excluded from the build context.
+#
+# Two reasons, and the second is the one that matters:
+#
+#   1. Speed. Without this the daemon uploads the virtualenvs and every generated
+#      warehouse file before running the first instruction.
+#   2. Safety. The Dockerfile copies named directories, but the *context* is sent
+#      whole -- so a stray .env or a local warehouse full of data is handed to the
+#      builder even when no COPY names it. Excluding them here is what stops a
+#      future `COPY . .` from quietly shipping a credential.
+
+# Environments and caches
+.venv*/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Generated data and warehouses -- rebuilt by the loader, never baked into an image
+*.duckdb
+data/*.csv
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+.streamlit/
+
+# Version control and tooling state
+.git/
+.github/
+.gitignore
+.gitattributes
+.claude/
+
+# Documentation and tests are not part of the runtime image
+docs/
+tests/
+*.md
+!README.md
+
+# Local editor noise
+.vscode/
+.idea/
+*.swp
+.DS_Store

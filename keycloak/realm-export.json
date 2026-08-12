@@ -1,0 +1,149 @@
+{
+  "realm": "transferops",
+  "enabled": true,
+  "displayName": "Transfer & Conversion Intelligence Platform",
+  "sslRequired": "external",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "verifyEmail": true,
+  "duplicateEmailsAllowed": false,
+  "editUsernameAllowed": false,
+  "loginWithEmailAllowed": true,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "passwordPolicy": "length(12) and digits(1) and upperCase(1) and lowerCase(1)",
+  "loginTheme": "transferops",
+  "emailTheme": "transferops",
+  "smtpServer": {
+    "host": "${KEYCLOAK_SMTP_HOST}",
+    "port": "${KEYCLOAK_SMTP_PORT}",
+    "from": "${KEYCLOAK_SMTP_FROM}",
+    "fromDisplayName": "Transfer & Conversion Intelligence Platform",
+    "replyTo": "${KEYCLOAK_SMTP_REPLY_TO}",
+    "auth": "${KEYCLOAK_SMTP_AUTH}",
+    "user": "${KEYCLOAK_SMTP_USER}",
+    "password": "${KEYCLOAK_SMTP_PASSWORD}",
+    "ssl": "${KEYCLOAK_SMTP_SSL}",
+    "starttls": "${KEYCLOAK_SMTP_STARTTLS}"
+  },
+  "accessTokenLifespan": 1800,
+  "roles": {
+    "realm": [
+      { "name": "TRANSFER_VIEWER",  "description": "Read-only dashboard access" },
+      { "name": "TRANSFER_ANALYST", "description": "Portfolio analytics and assistant access" },
+      { "name": "TRANSFER_MANAGER", "description": "Assigned portfolio only" },
+      { "name": "REPORT_DEVELOPER", "description": "Builds governed marts and dashboards" },
+      { "name": "PLATFORM_ADMIN",   "description": "Full access including the metric catalogue" }
+    ]
+  },
+  "groups": [
+    { "name": "Automotive",  "realmRoles": ["TRANSFER_MANAGER"] },
+    { "name": "Power",       "realmRoles": ["TRANSFER_MANAGER"] },
+    { "name": "IoT",         "realmRoles": ["TRANSFER_VIEWER"] },
+    { "name": "Executive",   "realmRoles": ["TRANSFER_ANALYST"] }
+  ],
+  "clients": [
+    {
+      "clientId": "transferops-api",
+      "name": "Transfer & Conversion Intelligence Platform Analytics API",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "http://localhost:5173/*",
+        "http://127.0.0.1:5173/*",
+        "http://localhost:4173/*",
+        "http://127.0.0.1:4173/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173"
+      ],
+      "protocol": "openid-connect",
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "defaultClientScopes": ["profile", "email", "roles"],
+      "protocolMappers": [
+        {
+          "name": "transferops-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "transferops-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "_comment_default_roles": [
+    "Every user carries 'default-roles-transferops' alongside their application",
+    "role. Keycloak creates that composite during import and hangs the account",
+    "client's view-profile and manage-account roles off it -- so it is what lets",
+    "a signed-in user open the account console ('Manage account' in the shell).",
+    "An explicit realmRoles list REPLACES the defaults rather than adding to it,",
+    "so omitting it here is what makes /realms/transferops/account answer 401."
+  ],
+  "users": [
+    {
+      "username": "admin.demo",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Avery", "lastName": "Admin",
+      "email": "admin.demo@example.invalid",
+      "credentials": [{ "type": "password", "value": "TransferDemo1!", "temporary": false }],
+      "realmRoles": ["default-roles-transferops", "PLATFORM_ADMIN"]
+    },
+    {
+      "username": "analyst.demo",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Ana", "lastName": "Analyst",
+      "email": "analyst.demo@example.invalid",
+      "credentials": [{ "type": "password", "value": "TransferDemo1!", "temporary": false }],
+      "realmRoles": ["default-roles-transferops", "TRANSFER_ANALYST"],
+      "groups": ["/Executive"]
+    },
+    {
+      "username": "manager.auto",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Mo", "lastName": "Manager",
+      "email": "manager.auto@example.invalid",
+      "credentials": [{ "type": "password", "value": "TransferDemo1!", "temporary": false }],
+      "realmRoles": ["default-roles-transferops", "TRANSFER_MANAGER"],
+      "groups": ["/Automotive"]
+    },
+    {
+      "username": "manager.power",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Pat", "lastName": "Manager",
+      "email": "manager.power@example.invalid",
+      "credentials": [{ "type": "password", "value": "TransferDemo1!", "temporary": false }],
+      "realmRoles": ["default-roles-transferops", "TRANSFER_MANAGER"],
+      "groups": ["/Power"]
+    },
+    {
+      "username": "viewer.demo",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Vic", "lastName": "Viewer",
+      "email": "viewer.demo@example.invalid",
+      "credentials": [{ "type": "password", "value": "TransferDemo1!", "temporary": false }],
+      "realmRoles": ["default-roles-transferops", "TRANSFER_VIEWER"],
+      "groups": ["/IoT"]
+    }
+  ]
+}

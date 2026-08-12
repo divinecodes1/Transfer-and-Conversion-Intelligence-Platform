@@ -1,0 +1,51 @@
+# Transfer & Conversion Intelligence Platform :: runtime dependencies, pinned.
+#
+# Exact versions rather than floors. A `>=` range means the image built today and
+# the image built next month are different software, so a green pipeline stops
+# being evidence that the artefact you are about to deploy works. Upgrades happen
+# by editing this file deliberately and re-running the suites, which is the only
+# point at which a dependency change is reviewable.
+#
+# Regenerate the pins from a known-good environment with:
+#     pip freeze --exclude-editable
+
+# ---- Warehouse -------------------------------------------------------------
+duckdb==1.5.5                    # local, server-free warehouse for dev + tests
+psycopg2-binary==2.9.12          # PostgreSQL deployment path
+
+# ---- Services --------------------------------------------------------------
+# One framework serves the analytics API, the assistant and the dashboard.
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+httpx==0.28.1                    # inter-service calls + the ASGI test transport
+
+# ---- AI (optional at runtime) ----------------------------------------------
+# The official SDK for the default provider. Everything in `ai/` imports it
+# lazily and `tests/ai_checks.py` runs without it, so a deployment that never
+# switches AI on carries the dependency and nothing else -- and one that points
+# TRANSFEROPS_AI_PROVIDER at an OpenAI-compatible endpoint or a local model never
+# loads it at all, because that adapter is raw HTTP over the httpx already above.
+anthropic==0.121.0
+
+# ---- Identity --------------------------------------------------------------
+python-jose[cryptography]==3.5.0  # verify Keycloak JWTs (signature, iss, aud, exp)
+
+# ---- Semantic knowledge base -----------------------------------------------
+# Runs in-process by default (":memory:"), so retrieval is testable without a
+# server; point TRANSFEROPS_QDRANT at the container to use it.
+qdrant-client==1.19.0
+
+# ---- Observability ---------------------------------------------------------
+prometheus-client==0.26.0
+
+# ---- Manifest checks -------------------------------------------------------
+PyYAML==6.0.3                    # tests/k8s_checks.py parses the manifests
+
+# The hand-built dashboard in bi/ still adds nothing here: it is a static page
+# served by the FastAPI above, with charts drawn as SVG. It remains the reference
+# implementation of "BI visualises, it never recomputes", and it keeps working
+# with no Node toolchain anywhere near the machine.
+#
+# The React console in web/ carries its own dependencies in web/package.json,
+# where they belong -- a Python deployment that only serves the API and the
+# hand-built dashboard installs none of them.

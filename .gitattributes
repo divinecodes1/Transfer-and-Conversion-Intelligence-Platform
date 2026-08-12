@@ -1,0 +1,20 @@
+# Normalise line endings in the repository regardless of who commits from where.
+# CI checks out on Linux; a Makefile recipe or shell script carrying CRLF fails
+# there in ways that look like a logic error rather than an encoding one.
+* text=auto
+
+# Files where CRLF actively breaks execution, pinned explicitly so they are
+# correct even if a contributor has core.autocrlf configured differently.
+Makefile        text eol=lf
+Dockerfile      text eol=lf
+*.sh            text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.sql           text eol=lf
+*.py            text eol=lf
+
+# Never touched.
+*.duckdb        binary
+*.pdf           binary
+*.png           binary
+*.jpg           binary

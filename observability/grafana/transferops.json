@@ -1,0 +1,221 @@
+{
+  "title": "Transfer & Conversion Intelligence Platform - platform health and assistant adoption",
+  "uid": "transferops-platform",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Pipeline",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+    },
+    {
+      "type": "stat",
+      "title": "Data freshness",
+      "description": "Age of the most recent project snapshot. The number users implicitly trust when they read a dashboard, so it is shown rather than assumed.",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "d",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 7 },
+              { "color": "red", "value": 30 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        { "expr": "transferops_data_freshness_days", "refId": "A" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Last successful load",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "dateTimeFromNow" } },
+      "targets": [
+        { "expr": "transferops_last_successful_load_timestamp * 1000", "refId": "A" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Failing DQ gates",
+      "description": "Non-zero means the last load completed while its own quality gates were failing.",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [{ "expr": "transferops_dq_gate_failures", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "Load duration",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "transferops_last_load_duration_seconds", "refId": "A" }
+      ]
+    },
+
+    {
+      "type": "row",
+      "title": "Analytics API",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Request rate by endpoint",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [
+        {
+          "expr": "sum by (endpoint) (rate(transferops_api_requests_total[5m]))",
+          "legendFormat": "{{endpoint}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "P95 latency by endpoint",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, endpoint) (rate(transferops_api_request_seconds_bucket[5m])))",
+          "legendFormat": "{{endpoint}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "type": "row",
+      "title": "Assistant — adoption and trust",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 }
+    },
+    {
+      "type": "stat",
+      "title": "Security events",
+      "description": "Injection attempts and write requests refused. The target is zero occurrences reaching data, not a rate to optimise.",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        { "expr": "sum(transferops_agent_security_events_total)", "refId": "A" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Provenance completeness",
+      "description": "Share of answers carrying metric, filters and data vintage. Anything below 100% means someone received a number they cannot reproduce.",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 16 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0.999 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(transferops_agent_provenance_total{complete=\"true\"}) / clamp_min(sum(transferops_agent_provenance_total), 1)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Abstention rate",
+      "description": "Questions declined rather than guessed. Healthy is low but non-zero — zero means it is guessing at ambiguity.",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "targets": [
+        {
+          "expr": "sum(transferops_agent_questions_total{outcome=\"abstained\"}) / clamp_min(sum(transferops_agent_questions_total), 1)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "P95 answer latency",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(transferops_agent_seconds_bucket[5m])))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Questions answered by the governed platform",
+      "description": "The adoption signal. An assistant nobody trusts enough to ask is a failure however good its latency graph looks.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(transferops_agent_questions_total[15m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "piechart",
+      "title": "Which metrics people actually ask for",
+      "description": "Drives what to govern, document and optimise next.",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 21 },
+      "targets": [
+        {
+          "expr": "sum by (metric_code) (transferops_agent_metric_resolved_total)",
+          "legendFormat": "{{metric_code}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "piechart",
+      "title": "Why it declined",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 21 },
+      "targets": [
+        {
+          "expr": "sum by (reason) (transferops_agent_abstentions_total)",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

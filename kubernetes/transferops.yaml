@@ -1,0 +1,295 @@
+# ============================================================================
+# Transfer & Conversion Intelligence Platform :: local Kubernetes deployment (kind / k3d)
+#
+# What is here and what is deliberately not:
+#
+#   deployed      api, agent, dashboard, qdrant  -- stateless, and stable enough
+#                 that a failed pod is a restart rather than a lost demo
+#   NOT deployed  PostgreSQL, Prometheus, Grafana, Keycloak
+#
+# The database stays in Docker Compose on purpose. Running a stateful warehouse
+# in a local kind cluster adds PersistentVolume behaviour to the list of things
+# that can break during a ten-minute demo, and buys nothing architecturally --
+# the interesting claim is that the *services* are stateless and horizontally
+# scalable, which is exactly what is shown here. The plan says as much: move only
+# what remains stable.
+#
+#   kind create cluster --name transferops
+#   docker build -t transferops:dev .
+#   kind load docker-image transferops:dev --name transferops
+#   kubectl apply -f kubernetes/transferops.yaml
+#   kubectl -n transferops get pods
+# ============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: transferops
+  labels:
+    app.kubernetes.io/part-of: transferops
+---
+# Connection strings, not secrets in the security sense -- these are the local
+# demo credentials that already appear in docker-compose. Real deployment binds
+# these from an external secret store; committing production credentials to a
+# repository is the thing this file must not model.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: transferops-db
+  namespace: transferops
+type: Opaque
+stringData:
+  TRANSFEROPS_DSN: postgresql://app:dev@host.docker.internal:5432/transferops
+  TRANSFEROPS_API_DSN: postgresql://transferops_reader:reader@host.docker.internal:5432/transferops
+  TRANSFEROPS_AUDIT_DSN: postgresql://transferops_auditor:auditor@host.docker.internal:5432/transferops
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: transferops-config
+  namespace: transferops
+data:
+  TRANSFEROPS_API: http://analytics-api:8000
+  TRANSFEROPS_QDRANT: http://qdrant:6333
+  # The image defaults to `enforce`. This overrides it back to `demo` because the
+  # local kind cluster has no Keycloak in front of it, and the whole point of the
+  # cluster demo is that it is reachable without one. It is a DOWNGRADE, stated
+  # here rather than inherited: X-Demo-User is accepted without authentication.
+  # A real deployment deletes this line and lets the image default stand.
+  TRANSFEROPS_AUTH: demo
+---
+# ---- Analytics API --------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-api
+  namespace: transferops
+  labels: { app: analytics-api }
+spec:
+  replicas: 2          # stateless and read-only, so replicas are free
+  selector:
+    matchLabels: { app: analytics-api }
+  template:
+    metadata:
+      labels: { app: analytics-api }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: api
+          image: transferops:dev
+          imagePullPolicy: IfNotPresent
+          command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - { containerPort: 8000, name: http }
+          envFrom:
+            - secretRef: { name: transferops-db }
+            - configMapRef: { name: transferops-config }
+          # The liveness probe hits /health, which does a real warehouse
+          # round-trip. A process that is running but cannot reach the metric
+          # layer is not healthy, whatever the port says.
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics-api
+  namespace: transferops
+spec:
+  selector: { app: analytics-api }
+  ports:
+    - { port: 8000, targetPort: 8000, name: http }
+---
+# ---- Assistant ------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: assistant
+  namespace: transferops
+  labels: { app: assistant }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: assistant }
+  template:
+    metadata:
+      labels: { app: assistant }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: assistant
+          image: transferops:dev
+          imagePullPolicy: IfNotPresent
+          command: ["uvicorn", "agent.app:app", "--host", "0.0.0.0", "--port", "8100"]
+          ports:
+            - { containerPort: 8100, name: http }
+          envFrom:
+            - secretRef: { name: transferops-db }
+            - configMapRef: { name: transferops-config }
+          livenessProbe:
+            httpGet: { path: /health, port: 8100 }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /health, port: 8100 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 500m, memory: 768Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: assistant
+  namespace: transferops
+spec:
+  selector: { app: assistant }
+  ports:
+    - { port: 8100, targetPort: 8100, name: http }
+---
+# ---- Dashboards -----------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: transferops
+  labels: { app: dashboard }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: dashboard }
+  template:
+    metadata:
+      labels: { app: dashboard }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: dashboard
+          image: transferops:dev
+          imagePullPolicy: IfNotPresent
+          command: ["uvicorn", "bi.server:app",
+                    "--host", "0.0.0.0", "--port", "8501"]
+          ports:
+            - { containerPort: 8501, name: http }
+          # The dashboard holds no database credentials by design -- it reaches
+          # data only through the API. Note the absence of the db secret here.
+          envFrom:
+            - configMapRef: { name: transferops-config }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8501 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8501 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          # A static page and a fixed route list: lighter than the API, and it
+          # never writes, so the root filesystem is read-only like the others.
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { cpu: 250m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+  namespace: transferops
+spec:
+  type: NodePort
+  selector: { app: dashboard }
+  ports:
+    - { port: 8501, targetPort: 8501, nodePort: 30501, name: http }
+---
+# ---- Vector store ---------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qdrant
+  namespace: transferops
+  labels: { app: qdrant }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: qdrant }
+  template:
+    metadata:
+      labels: { app: qdrant }
+    spec:
+      containers:
+        - name: qdrant
+          image: qdrant/qdrant:v1.12.4
+          ports:
+            - { containerPort: 6333, name: http }
+          # The knowledge base is rebuilt from the catalogue on startup, so this
+          # pod is disposable: losing it costs a rebuild, not data.
+          volumeMounts:
+            - { name: storage, mountPath: /qdrant/storage }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 6333 }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 500m, memory: 1Gi }
+      volumes:
+        - name: storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: transferops
+spec:
+  selector: { app: qdrant }
+  ports:
+    - { port: 6333, targetPort: 6333, name: http }
+---
+# ---- Network policy -------------------------------------------------------
+# Defence in depth, matching the database's own posture: the dashboard may talk
+# to the API and nothing else. It holds no credentials, and now it has no route
+# to the warehouse either.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dashboard-egress
+  namespace: transferops
+spec:
+  podSelector:
+    matchLabels: { app: dashboard }
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels: { app: analytics-api }
+      ports:
+        - { protocol: TCP, port: 8000 }
+    - ports:                       # DNS
+        - { protocol: UDP, port: 53 }

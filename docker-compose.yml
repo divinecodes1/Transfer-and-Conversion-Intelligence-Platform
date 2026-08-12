@@ -1,0 +1,103 @@
+# PostgreSQL deployment target. pgvector image is used so the later AI-agent
+# phase can store metric/report embeddings in the same database (semantic
+# metric resolution) without adding another datastore.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: transferops
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d transferops"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Identity provider. Optional: the platform runs without it (TRANSFEROPS_AUTH
+  # defaults to demo mode), and turning it on changes only where a username comes
+  # from -- entitlements still resolve from tr_gov, and enforcement stays in the
+  # row-level policy. Authentication and authorisation are separable on purpose.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+      KEYCLOAK_SMTP_HOST: ${KEYCLOAK_SMTP_HOST:-mailpit}
+      KEYCLOAK_SMTP_PORT: ${KEYCLOAK_SMTP_PORT:-1025}
+      KEYCLOAK_SMTP_FROM: ${KEYCLOAK_SMTP_FROM:-no-reply@transferops.local}
+      KEYCLOAK_SMTP_REPLY_TO: ${KEYCLOAK_SMTP_REPLY_TO:-support@transferops.local}
+      KEYCLOAK_SMTP_AUTH: ${KEYCLOAK_SMTP_AUTH:-false}
+      KEYCLOAK_SMTP_USER: ${KEYCLOAK_SMTP_USER:-}
+      KEYCLOAK_SMTP_PASSWORD: ${KEYCLOAK_SMTP_PASSWORD:-}
+      KEYCLOAK_SMTP_SSL: ${KEYCLOAK_SMTP_SSL:-false}
+      KEYCLOAK_SMTP_STARTTLS: ${KEYCLOAK_SMTP_STARTTLS:-false}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+      - ./keycloak/themes:/opt/keycloak/themes:ro
+    depends_on:
+      - mailpit
+    profiles: ["sso"]
+
+  # Local SMTP inbox for verification and reset messages. Nothing is delivered
+  # to the public internet; open http://localhost:8025 to inspect the messages.
+  # Production overrides the KEYCLOAK_SMTP_* values with its approved provider.
+  mailpit:
+    image: axllent/mailpit:v1.30.0
+    ports:
+      - "8025:8025"
+    environment:
+      MP_MAX_MESSAGES: 500
+    profiles: ["sso"]
+
+  # Vector store for the semantic knowledge base. Optional: the retriever runs
+  # the same engine in-process by default, so the demo and the tests work without
+  # this. Point TRANSFEROPS_QDRANT at it to use the server instead.
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrantdata:/qdrant/storage
+    profiles: ["rag"]
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    profiles: ["obs"]
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      # Dashboards are provisioned from version control, never hand-edited in a
+      # running instance -- the same rule the metric layer follows.
+      - ./observability/grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
+      - ./observability/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./observability/grafana/transferops.json:/etc/grafana/provisioning/dashboards/transferops.json:ro
+    depends_on:
+      - prometheus
+    profiles: ["obs"]
+
+volumes:
+  pgdata: {}
+  qdrantdata: {}

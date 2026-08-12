@@ -1,0 +1,121 @@
+# Transfer & Conversion Intelligence Platform :: alerting rules.
+#
+# An alert is a claim that a human should stop what they are doing. So the test
+# each rule below has to pass is not "is this measurable?" but "if this fires at
+# 03:00, is there something to do about it?" Rules that fail that test become
+# noise, and noise is how the ones that matter get muted.
+#
+# Nothing here alerts on a single slow request or a single 500. Those are facts
+# about one request; the dashboards and the audit trail are where they belong.
+# These fire on conditions that persist.
+groups:
+  - name: transferops-pipeline
+    rules:
+      # The failure mode that costs the most trust: dashboards that look fine and
+      # quietly show last week's portfolio. Nobody notices from the numbers alone,
+      # which is exactly why it needs an alert rather than an observer.
+      - alert: WarehouseDataStale
+        expr: transferops_data_freshness_days > 2
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Warehouse data is {{ $value }} days old"
+          description: >-
+            The most recent project snapshot is older than the refresh schedule
+            allows. The dashboards are serving numbers that look current and are
+            not. Check the pipeline run before anyone makes a decision on them.
+
+      - alert: NoSuccessfulLoad
+        expr: time() - transferops_last_successful_load_timestamp > 36 * 3600
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: "No successful warehouse load for over 36 hours"
+          description: >-
+            The daily refresh has not completed successfully. Past 36 hours this
+            is a missed run rather than a slow one.
+
+      # A refresh that silently changes a KPI is worse than one that failed, so a
+      # failing gate is an alert and not a log line.
+      - alert: DataQualityGateFailing
+        expr: transferops_dq_gate_failures > 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $value }} data-quality gate(s) failing on the last load"
+          description: >-
+            The most recent load completed with failing gates. Treat the affected
+            metrics as unpublished until the cause is understood.
+
+  - name: transferops-api
+    rules:
+      - alert: ApiErrorRateHigh
+        expr: >-
+          sum(rate(transferops_api_requests_total{status=~"5.."}[5m]))
+          / clamp_min(sum(rate(transferops_api_requests_total[5m])), 0.001) > 0.05
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Analytics API is returning {{ $value | humanizePercentage }} 5xx"
+
+      # P95 rather than a mean: an average hides the tail that users actually
+      # experience, and the tail is what makes a dashboard feel broken.
+      - alert: ApiLatencyHigh
+        expr: >-
+          histogram_quantile(0.95,
+            sum(rate(transferops_api_request_seconds_bucket[5m])) by (le, endpoint)) > 2
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "P95 latency on {{ $labels.endpoint }} is {{ $value }}s"
+
+      - alert: ApiUnauthorisedSpike
+        expr: sum(rate(transferops_api_requests_total{status="401"}[5m])) > 1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Sustained 401s against the analytics API"
+          description: >-
+            Either a client is misconfigured after a credential rotation, or
+            someone is probing. Both are worth knowing about; the request log
+            carries the identity and route for each one.
+
+  - name: transferops-assistant
+    rules:
+      # Not a percentage to improve: the target is zero, so any sustained rate is
+      # worth a look at the audit trail.
+      - alert: AssistantSecurityEvents
+        expr: sum(rate(transferops_agent_security_events_total[15m])) > 0
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Assistant refused {{ $labels.kind }} attempts"
+          description: >-
+            Injection or action-request attempts are being refused as designed.
+            Sustained volume means someone is trying repeatedly; tr_gov.agent_audit
+            has the questions.
+
+      # Provenance is the product here. An answer without it is a claim, so a
+      # drop below the threshold is a correctness alert, not a cosmetic one.
+      - alert: AssistantProvenanceIncomplete
+        expr: >-
+          sum(rate(transferops_agent_provenance_total{complete="false"}[15m]))
+          / clamp_min(sum(rate(transferops_agent_provenance_total[15m])), 0.001) > 0.01
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Assistant answers are missing provenance"
+          description: >-
+            More than 1% of answers went out without a definition, filter set or
+            data vintage attached. Those answers cannot be reproduced.
+
+      # Abstention is correct behaviour, but a sharp rise usually means the
+      # catalogue moved and the resolver's vocabulary no longer matches it.
+      - alert: AssistantAbstentionRateHigh
+        expr: >-
+          sum(rate(transferops_agent_abstentions_total{reason="out_of_scope"}[30m]))
+          / clamp_min(sum(rate(transferops_agent_questions_total[30m])), 0.001) > 0.5
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Over half of questions are falling outside the catalogue"

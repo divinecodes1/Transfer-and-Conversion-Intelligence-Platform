@@ -1,0 +1,162 @@
+name: CI
+
+# A green pipeline is worth more than elaborate deployment logic. This runs the
+# same gates a developer runs locally, in the same order, against a real
+# PostgreSQL -- so "it works on my machine" and "it works" are the same claim.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # Same image as docker-compose, so CI and local development cannot
+        # disagree about what the database supports.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: transferops
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U app -d transferops"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      TRANSFEROPS_DSN: postgresql://app:dev@localhost:5432/transferops
+      TRANSFEROPS_API_DSN: postgresql://transferops_reader:reader@localhost:5432/transferops
+      TRANSFEROPS_AUDIT_DSN: postgresql://transferops_auditor:auditor@localhost:5432/transferops
+      # Role passwords are supplied rather than read from the SQL. Throwaway
+      # values for a throwaway database, set explicitly so CI exercises the same
+      # path a real deployment uses instead of the local-host fallback.
+      TRANSFEROPS_READER_PASSWORD: reader
+      TRANSFEROPS_AUDITOR_PASSWORD: auditor
+      TRANSFEROPS_AI_DSN: postgresql://transferops_ai:ai@localhost:5432/transferops
+      TRANSFEROPS_AI_PASSWORD: ai
+      # No AI credential in CI, on purpose. Every AI gate is written to run
+      # without a model, so the suite proves the platform degrades correctly
+      # rather than proving a provider was reachable that morning.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Syntax check
+        run: python -m compileall -q ai api agent bi etl observability tests
+
+      # ---- the data foundation -----------------------------------------
+      - name: Generate the synthetic portfolio
+        run: python etl/generate_data.py
+
+      - name: Build the DuckDB warehouse
+        run: python etl/run.py --engine duckdb
+
+      # ---- gates that need no server ------------------------------------
+      - name: Golden-project reconciliation
+        run: python tests/golden_projects.py
+
+      - name: Metric governance (catalogue vs implementation)
+        run: python tests/governance_checks.py
+
+      - name: Mart layer (the console's rollups vs the metric layer)
+        run: python tests/mart_checks.py
+
+      - name: AI layer boundaries (runs without a model)
+        run: python tests/ai_checks.py
+
+      - name: Console holds no SQL, credentials or metric logic
+        run: python tests/web_checks.py
+
+      - name: Legacy vs governed reconciliation
+        run: python tests/legacy_reconciliation.py
+
+      - name: Orchestration (DAG parses and delegates)
+        run: python tests/orchestration_checks.py
+
+      - name: Kubernetes manifests
+        run: python tests/k8s_checks.py
+
+      - name: Authentication, verification and recovery configuration
+        run: python tests/auth_checks.py
+
+      # ---- the deployment engine ----------------------------------------
+      - name: Build the PostgreSQL warehouse
+        run: python etl/run.py --engine postgres --dsn "$TRANSFEROPS_DSN"
+
+      - name: Layered ingestion and data-quality tiers
+        run: python tests/ingestion_checks.py
+
+      # The layered ingestion test reloads PostgreSQL through the RAW path, so
+      # restore the canonical bulk-loaded state before the service gates run.
+      - name: Restore the PostgreSQL warehouse
+        run: python etl/run.py --engine postgres --dsn "$TRANSFEROPS_DSN"
+
+      - name: API contract
+        run: python tests/api_checks.py
+
+      - name: BI layer isolation
+        run: python tests/bi_checks.py
+
+      - name: Assistant evaluation
+        run: python tests/agent_checks.py
+
+      - name: Entitlement enforcement
+        run: python tests/rbac_checks.py
+
+      # Auth posture, credential handling, dependency pinning, build context.
+      # Runs with no TRANSFEROPS_AUTH set, because asserting the platform's own
+      # default is half the point.
+      - name: Security posture
+        run: python tests/security_checks.py
+
+      - name: Observability and audit
+        run: python tests/observability_checks.py
+
+      - name: Semantic knowledge base
+        run: python tests/rag_checks.py
+
+      - name: Fine-tuning dataset consistency
+        run: python tests/finetuning_checks.py
+
+      # ---- the console ---------------------------------------------------
+      # Typecheck and build, not a browser test. What CI can prove cheaply is
+      # that the console compiles against the API types it claims to consume;
+      # what it cannot prove is that a chart looks right, so it does not pretend to.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install console dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Typecheck and build the console
+        run: npm run build
+        working-directory: web
+
+      # Built last: the manifests reference this image, so a broken build would
+      # make the deployment story fiction.
+      - name: Build the container image
+        run: docker build -t transferops:dev .
+
+      - name: Summary
+        if: success()
+        run: echo "All seventeen suites green, and the console builds."
