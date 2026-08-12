@@ -553,7 +553,7 @@ export function AiAssistant() {
         onClick={() => setOpen(true)}
       >
         <Bot />
-        Ask the assistant
+        Ask AI Copilot
       </Button>
     );
   }
@@ -563,7 +563,7 @@ export function AiAssistant() {
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <div className="flex items-center gap-2 text-sm font-medium">
           <Bot className="size-4 text-primary" />
-          Assistant
+          AI Copilot
         </div>
         <Button variant="ghost" size="icon" onClick={() => setOpen(false)} aria-label="Close">
           <X />

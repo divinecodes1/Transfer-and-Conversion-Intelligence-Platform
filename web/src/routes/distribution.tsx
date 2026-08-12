@@ -51,7 +51,7 @@ export function DistributionScreen() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Cycle-time distribution"
+        title="Transfer Performance"
         description="Percentiles per cohort. The spread is the point — an average duration tells a site nothing about the date it can safely commit to."
       />
 

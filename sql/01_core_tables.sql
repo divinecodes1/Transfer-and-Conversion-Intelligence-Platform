@@ -16,9 +16,11 @@
 -- (03) and mart (04) is bound to these tables. Everything CASCADE removes here
 -- is derived and recreated later in the same run. DuckDB accepts the same
 -- syntax, so both engines keep sharing one set of SQL files.
+DROP TABLE IF EXISTS tr_core.fact_readiness_assessment CASCADE;
 DROP TABLE IF EXISTS tr_core.fact_milestone_event CASCADE;
 DROP TABLE IF EXISTS tr_core.fact_schedule_revision CASCADE;
 DROP TABLE IF EXISTS tr_core.fact_project_snapshot CASCADE;
+DROP TABLE IF EXISTS tr_core.dim_readiness_dimension CASCADE;
 DROP TABLE IF EXISTS tr_core.dim_milestone CASCADE;
 DROP TABLE IF EXISTS tr_core.dim_fiscal_date CASCADE;
 DROP TABLE IF EXISTS tr_core.dim_project CASCADE;
@@ -54,6 +56,26 @@ CREATE TABLE tr_core.dim_fiscal_date (
     fiscal_year     INTEGER                     -- Infineon FY starts 1 October
 );
 
+-- The seven readiness dimensions and what each one is worth.
+--
+-- The weight is DATA, not a constant in a view, for the same reason the metric
+-- catalogue exists: "how ready is this transfer?" is a business rule that will be
+-- renegotiated -- per transfer type, eventually -- and a rule renegotiated in a
+-- CASE expression is a rule nobody outside engineering can read or audit. Storing
+-- it here means the readiness view computes `SUM(score * weight) / SUM(weight)`
+-- and never names a dimension at all, so re-weighting is an UPDATE and not a
+-- deployment.
+--
+-- The weights sum to 100 and tests/readiness_checks.py asserts it. A set that
+-- sums to 97 still produces a plausible-looking percentage, which is precisely
+-- what makes that failure worth gating rather than trusting.
+CREATE TABLE tr_core.dim_readiness_dimension (
+    dimension_code  VARCHAR PRIMARY KEY,        -- QUALIFICATION | EQUIPMENT | ...
+    dimension_name  VARCHAR,
+    weight_pct      INTEGER,                    -- integer so the sum is exact
+    sequence_no     INTEGER
+);
+
 -- ---- Facts ----------------------------------------------------------------
 
 -- One row per milestone reached/planned per project.
@@ -87,4 +109,17 @@ CREATE TABLE tr_core.fact_project_snapshot (
     current_stage   VARCHAR,
     risk_status     VARCHAR,                    -- GREEN | AMBER | RED
     progress_pct    DOUBLE PRECISION
+);
+
+-- One score per project per readiness dimension, carrying the date it was
+-- assessed. Long, not wide: seven columns on dim_project would make an eighth
+-- dimension a schema migration, and would leave nowhere to record *when* a
+-- dimension was last looked at -- which is the difference between "material
+-- readiness is 40%" and "material readiness was 40% five months ago", and only
+-- one of those is a reason to act.
+CREATE TABLE tr_core.fact_readiness_assessment (
+    project_key     INTEGER NOT NULL,
+    dimension_code  VARCHAR NOT NULL,
+    assessed_on     DATE,
+    score_pct       INTEGER                     -- 0..100, gated in the DQ checks
 );

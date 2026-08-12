@@ -239,8 +239,8 @@ export function AskScreen() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Ask AI"
-        description="Ask the governed metric layer a plain-language question. Your portfolio filters are applied automatically."
+        title="AI Copilot"
+        description="Ask questions about the Transfer & Conversion portfolio. Answers retain the current scope, sources and governed metric definitions."
       />
 
       <div className="flex gap-1.5">

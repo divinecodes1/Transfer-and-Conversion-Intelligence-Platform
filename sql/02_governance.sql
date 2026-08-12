@@ -75,4 +75,42 @@ INSERT INTO tr_gov.metric_definition
 
 ('PORTFOLIO_WIP','Work in Progress',
  'count of transfer projects started and not yet finished','Portfolio','count',
- 'Started transfer projects with no actual finish','Cancelled projects','Transfer Management','1.0','2026-10-01');
+ 'Started transfer projects with no actual finish','Cancelled projects','Transfer Management','1.0','2026-10-01'),
+
+-- ---------------------------------------------------------------------------
+-- Readiness, network and similarity.
+--
+-- All three are registered here rather than living in tr_ai, because none of
+-- them is a model's opinion: each is an arithmetic rule over governed inputs,
+-- reproducible by hand from the same tables. The line this project draws is not
+-- "traditional vs AI" but "defined vs inferred" -- a weighted average with
+-- published weights belongs in the catalogue no matter how modern it looks, and
+-- ai/risk.py's delay probability stays out of it no matter how numeric it looks.
+-- ---------------------------------------------------------------------------
+('TRANSFER_READINESS_SCORE','Transfer Readiness',
+ 'sum(dimension_score * dimension_weight) / sum(dimension_weight)','Project','percent',
+ 'In-flight transfer projects (active or planned) holding a readiness assessment',
+ 'Completed projects, cancelled projects','Transfer Management','1.0','2026-10-01'),
+
+('READINESS_DIMENSION_SCORE','Readiness Dimension Score',
+ 'assessed preparedness of one readiness dimension','Project/dimension','percent',
+ 'In-flight transfer projects (active or planned) holding a readiness assessment',
+ 'Completed projects, cancelled projects','Transfer Management','1.0','2026-10-01'),
+
+-- The route grain is the metric here. Lead time and on-time rate are already
+-- registered at project grain and are NOT redefined -- this reuses them, and
+-- registers only the thing that is genuinely new: which stage of the lifecycle
+-- costs a given lane the most time.
+('ROUTE_BOTTLENECK_STAGE','Route Bottleneck Stage',
+ 'stage with the highest median stage cycle time on a source->target route','Route','stage',
+ 'Completed and active projects on the route that cleared both ends of a stage',
+ 'Cancelled projects','Transfer Management','1.0','2026-10-01'),
+
+-- Similarity is deterministic and its weights are published, so a manager can be
+-- told *why* two transfers were called alike. That is the whole reason it is not
+-- an embedding: "these are near each other in vector space" is not a defence of a
+-- decision, and this number has to survive being questioned in a review.
+('TRANSFER_SIMILARITY_SCORE','Transfer Similarity',
+ 'weighted match on transfer type, complexity, route and portfolio','Project pair','percent',
+ 'Completed reference projects scored against one in-flight project',
+ 'Cancelled projects, the project being compared','Transfer Management','1.0','2026-10-01');

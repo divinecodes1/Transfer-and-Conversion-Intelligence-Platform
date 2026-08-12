@@ -45,8 +45,10 @@ const COLUMNS: { key: string; label: string; sortable?: boolean; numeric?: boole
 
 export function ProjectsScreen() {
   const { filters } = useFilters();
-  const [search, setSearch] = React.useState("");
-  const [debounced, setDebounced] = React.useState("");
+  const [search, setSearch] = React.useState(
+    () => new URLSearchParams(window.location.search).get("search") ?? "",
+  );
+  const [debounced, setDebounced] = React.useState(search);
   const [sortBy, setSortBy] = React.useState("schedule_deviation_days");
   const [descending, setDescending] = React.useState(true);
 
@@ -78,8 +80,8 @@ export function ProjectsScreen() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Project register"
-        description="One governed row per live project. Drift is measured against the frozen baseline, never against the latest replan."
+        title="Transfer Portfolio"
+        description="Search, compare and prioritise governed transfer-project records. Schedule variance is measured against the frozen baseline."
       >
         <Button variant="outline" size="sm" onClick={exportRows} disabled={rows.length === 0}>
           <Download />

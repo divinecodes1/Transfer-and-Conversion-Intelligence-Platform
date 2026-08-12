@@ -1,1385 +1,2360 @@
-# Transfer & Conversion Intelligence Platform — Refined Master Plan
+# Infineon Transfer Intelligence Platform
 
-> ⚠️ **Historical document — kept for provenance, not for accuracy.** This is the
-> original scoping plan the build started from. It is deliberately *not* updated
-> as the system changes, so the choices it proposes can still be compared against
-> the choices that were actually made. Where it disagrees with the repository,
-> the repository is right. For current state see [PLAN.md](PLAN.md) (the build
-> sequence and its acceptance criteria) and the [README](../README.md).
->
-> The clearest divergences: the BI layer was hand-built rather than Superset /
-> Metabase / Streamlit, so the dashboards add zero dependencies; and a fenced
-> model layer (`ai/`) was added above the deterministic assistant rather than
-> instead of it.
+## Master Design & Development Plan
 
-## Infineon-Style Transfer-Project Performance Analytics Platform
-
-> **Purpose:** Build a runnable enterprise-style reference implementation of the transfer-project reporting platform described in the interview.
->
-> **Positioning:** This is an open, synthetic-data replica of the architectural pattern — not a claim to reproduce Infineon's internal production systems.
+### AI-assisted Transfer & Conversion Operations Intelligence
 
 ---
 
-## 1. Executive Summary
+## 1. Executive Vision
 
-The platform is best understood as a **transfer-project portfolio performance system**, not just a dashboard collection.
+The platform should be designed as a **semiconductor-specific digital operations and decision-intelligence platform** for Infineon's Transfer & Conversion Management environment.
 
-It should answer:
+It should **not** look like:
 
-- How are transfer projects performing?
-- How do forecasts compare with actual outcomes?
-- How far have schedules moved from the original baseline?
-- How does cycle-time distribution change across fiscal years?
-- Which projects are delayed, ageing, unstable, or hard to predict?
-- Can users get correct answers without already knowing the right dashboard filters?
+* a generic project-management application,
+* a standalone Tableau replacement,
+* a chatbot attached to dashboards,
+* or an AI demonstration with enterprise technologies added around it.
 
-The core architecture is:
+The correct product vision is:
 
-```text
-Sources
-  ↓
-RAW / STAGING
-  ↓
-Canonical CORE model
-  ↓
-Governed METRIC layer
-  ↓
-Reporting MARTS
-  ↓
-BI / Dashboards
-  ↓
-Read-only AI Assistant
-```
+> **Modernize the existing Oracle / BI Portal + Tableau reporting landscape into a unified Transfer & Conversion Operations Intelligence platform that supports project execution, cross-site reporting, transfer readiness, predictive risk, management decision support, data quality, and operational sustaining.**
 
-**Master principle:** define every business metric once and reuse it everywhere — SQL, BI, APIs, tests, and AI.
+This preserves the strongest direction already developed in the source plan: Oracle stays the trusted data layer, Tableau remains an important analytics environment, and AI is added as an intelligence layer rather than replacing the reporting stack.
+
+The platform's north-star flow should be:
+
+**Visibility → Reliability → Early Warning → Explanation → Prediction → Decision → Continuous Improvement**
 
 ---
 
-## 2. What the Demo Represents
+## 2. Why This Fits Infineon
 
-### Interview-supported concepts
+Infineon describes itself as a global semiconductor leader in **power systems and IoT**, with decarbonization and digitalization as major strategic themes. It had around 57,000 employees at the end of FY2025 and generated about €14.7 billion in FY2025.
 
-- transfer-project portfolio reporting
-- forward-looking and backward-looking performance
-- forecast cycle time vs historical cycle time
-- original schedule vs latest schedule
-- fiscal-year comparison
-- cycle-time distribution / box plots
-- filtering by relevant cohorts
-- clearer data / calculation / reporting separation
-- future self-explaining AI / agent functionality
+More importantly for this project, Infineon's **Global Supply Chain & Digital Manufacturing** organization explicitly says it develops digitalization solutions for front-end and back-end factories, integrates manufacturing-partner data, focuses on process integration and data integrity, and operates solutions against agreed service levels.
 
-### Replica implementation choices
+Infineon is also actively changing and expanding its manufacturing footprint. In 2026 it announced the gradual transfer of backend production from Tijuana to other sites to improve scalability, productivity and competitiveness, while maintaining uninterrupted customer supply. The company also completed the transfer of its Bangkok/Nonthaburi backend site to an OSAT partner while continuing investment in a new backend fab in Thailand.
 
-- PostgreSQL for deployment
-- DuckDB for fast local tests
-- Oracle-compatible modelling patterns
-- FastAPI
-- Airflow
-- Keycloak
-- Superset / Metabase / Streamlit
-- Qdrant
-- LangChain-style constrained agent
-- Prometheus / Grafana
-- Docker
-- kind / k3d Kubernetes
-- GitHub Actions
+The new Smart Power Fab in Dresden opened in July 2026. Infineon specifically highlighted faster qualification and ramp-up through its **One Virtual Fab** linkage with Villach.
 
-These are **reference-implementation choices**, not claims about hidden Infineon infrastructure.
+Those company developments make the Transfer & Conversion reporting problem much more than ordinary project tracking.
+
+The system must help answer:
+
+> **What is moving, from where to where, how ready is it, what is slipping, why is it slipping, what will happen next, and where should management intervene?**
+
+Earlier research correctly moved the concept toward cross-site manufacturing transformation rather than generic tasks.
 
 ---
 
-## 3. Infineon-to-Replica Mapping
+## 3. Product Positioning
 
-| Enterprise / interview concept | Replica |
-|---|---|
-| Relational analytical database | PostgreSQL / DuckDB |
-| Oracle-style warehouse architecture | Layered schemas, SQL views, materialized views |
-| BI Portal / Tableau | Superset / Metabase / Streamlit |
-| Original vs latest schedule | Immutable schedule revision history |
-| Forecast vs historical performance | Forecast snapshots + actual outcomes |
-| Fiscal-year box plots | Distribution mart with P25/P50/P75/P90 |
-| Filters | Governed dimensions |
-| Self-explaining reporting | Read-only AI analytics agent |
-| Corporate SSO / RBAC | Keycloak + DB row filtering |
-| Platform monitoring | Prometheus + Grafana |
+### Product name
 
----
+#### **Transfer Intelligence**
 
-## 4. Non-Negotiable Design Principles
+Subtitle:
 
-1. Evolutionary, not rip-and-replace.
-2. Preserve history explicitly.
-3. Metrics before dashboards.
-4. One governed definition per KPI.
-5. BI visualizes; BI does not redefine core metrics.
-6. Security must exist below the UI.
-7. LLMs handle language and planning; deterministic systems calculate.
-8. The first AI release is read-only.
-9. Every important number is regression-tested.
-10. Build one complete vertical slice before adding infrastructure depth.
+**AI-assisted Transfer & Conversion Operations Intelligence**
+
+Internal acronym:
+
+**TI**
+
+Do not use an official-sounding Infineon product name such as "OneTransfer" in a way that implies Infineon has endorsed it.
 
 ---
 
-## 5. Final Target Architecture
+## 4. Product Mission
+
+Transform Transfer & Conversion reporting from:
 
 ```text
-┌────────────────────────────────────────────────────────────┐
-│ SOURCE / INPUT                                             │
-│ Projects · Schedules · Milestones · Forecasts · Actuals   │
-│ Fiscal reference data · User entitlements                 │
-└──────────────────────────┬─────────────────────────────────┘
-                           ↓
-┌────────────────────────────────────────────────────────────┐
-│ INGESTION + DATA QUALITY                                   │
-│ Validate · deduplicate · normalize · audit · quarantine   │
-└──────────────────────────┬─────────────────────────────────┘
-                           ↓
-┌────────────────────────────────────────────────────────────┐
-│ RAW                                                        │
-│ Immutable source-faithful records                          │
-└──────────────────────────┬─────────────────────────────────┘
-                           ↓
-┌────────────────────────────────────────────────────────────┐
-│ STAGING                                                    │
-│ Typing · standardization · source cleanup                  │
-└──────────────────────────┬─────────────────────────────────┘
-                           ↓
-┌────────────────────────────────────────────────────────────┐
-│ CORE                                                       │
-│ Project · Milestone · Schedule Revision · Forecast         │
-│ Snapshot · Fiscal Calendar · Site · Portfolio              │
-└──────────────────────────┬─────────────────────────────────┘
-                           ↓
-┌────────────────────────────────────────────────────────────┐
-│ METRIC / SEMANTIC                                          │
-│ Cycle Time · Schedule Deviation · Forecast Accuracy        │
-│ Throughput · WIP · Replan · Stage Time · Distribution     │
-└──────────────────────────┬─────────────────────────────────┘
-                           ↓
-┌────────────────────────────────────────────────────────────┐
-│ MARTS                                                      │
-│ Project Status · Timeline · Cycle Distribution             │
-│ Forecast Accuracy · Portfolio Period · Data Quality        │
-└─────────────────┬──────────────────────┬───────────────────┘
-                  │                      │
-                  ↓                      ↓
-        ┌──────────────────┐   ┌─────────────────────────┐
-        │ BI / PORTAL      │   │ Governed Analytics API  │
-        │ dashboards       │   │ read-only metric tools  │
-        └────────┬─────────┘   └────────────┬────────────┘
-                 │                          ↓
-                 │               ┌───────────────────────┐
-                 │               │ AI / AGENT            │
-                 │               │ intent + filters      │
-                 │               │ semantic retrieval    │
-                 │               │ explanation/provenance│
-                 │               └────────────┬──────────┘
-                 └──────────────┬─────────────┘
-                                ↓
-                         BUSINESS USERS
+Oracle
+   +
+BI Portal
+   +
+Tableau
+   +
+Distributed Project Data
+   +
+Manual Interpretation
+```
+
+into:
+
+```text
+                 TRANSFER INTELLIGENCE
+                         │
+       ┌─────────────────┼─────────────────┐
+       │                 │                 │
+       ▼                 ▼                 ▼
+ Transfer Execution   Analytics       AI Intelligence
+       │                 │                 │
+ Projects            Tableau          Explain
+ Milestones          KPIs             Predict
+ Readiness           Trends           Recommend
+ Risks               Benchmarking     Summarize
+ Actions             Root Cause       Knowledge
+       │                 │                 │
+       └─────────────────┼─────────────────┘
+                         ▼
+                 GOVERNED DATA LAYER
+                         │
+                         ▼
+                      ORACLE
+                         │
+                         ▼
+               OPERATIONAL SUSTAINING
+```
+
+This directly extends the modernization path already defined in the supplied planning document.
+
+---
+
+## 5. Primary Product Principles
+
+### 5.1 Oracle remains authoritative
+
+Oracle should remain the **system of record** for enterprise transfer/reporting data.
+
+The new application consumes approved views, APIs and reporting models.
+
+AI never receives unrestricted database access.
+
+---
+
+### 5.2 Tableau remains visible
+
+The platform should enhance, not hide, Tableau.
+
+Tableau should continue to serve highly interactive analytical and management reporting needs, while Transfer Intelligence provides workflow, operational context, AI and unified navigation.
+
+The original plan correctly treats Tableau as an explicit analytics layer rather than something to replace.
+
+---
+
+### 5.3 Business first, technology second
+
+The user should see:
+
+**Transfer → Readiness → Risk → Performance → Decision**
+
+before seeing:
+
+**Kubernetes → Airflow → LLM → vector database → monitoring**
+
+---
+
+### 5.4 AI is governed intelligence
+
+AI should:
+
+* summarize,
+* explain,
+* detect,
+* predict,
+* retrieve knowledge,
+* recommend,
+
+but high-impact project changes require human approval.
+
+---
+
+### 5.5 Build + Operate + Improve
+
+This is essential because Infineon's Digital Manufacturing organization explicitly combines digitalization development with operating solutions to agreed service levels.
+
+The platform therefore needs both **business functionality** and **operational health**.
+
+---
+
+## 6. User Personas
+
+| Persona                | Primary need                           | Default experience  |
+| ---------------------- | -------------------------------------- | ------------------- |
+| Executive / Management | Portfolio visibility and intervention  | Command Center      |
+| Transfer Manager       | Execute and coordinate transfers       | Transfer Cockpit    |
+| Project Manager        | Manage milestones/actions/risks        | Project Workspace   |
+| Site Manager           | Understand incoming/outgoing transfers | Site Intelligence   |
+| Data Analyst           | Analyze trends and reporting           | Tableau & Analytics |
+| Operations Engineer    | Sustain digital platform               | Operations Center   |
+| Platform Administrator | Access/configuration/governance        | Administration      |
+| Viewer                 | Read-only visibility                   | Dashboard/Reports   |
+
+---
+
+## 7. Master Information Architecture
+
+```text
+TRANSFER INTELLIGENCE
+
+OVERVIEW
+├── Executive Command Center
+├── My Workspace
+└── Notifications
+
+TRANSFER MANAGEMENT
+├── Transfer Portfolio
+├── Projects
+├── Lifecycle
+├── Milestones
+├── Readiness
+├── Risks & Issues
+├── Dependencies
+├── Actions
+└── Sites
+
+PERFORMANCE
+├── Transfer Performance
+├── Site Performance
+├── Conversion Performance
+├── Qualification Performance
+├── Ramp-Up Performance
+└── Benchmarking
+
+ANALYTICS
+├── Tableau Analytics
+├── Portfolio Trends
+├── Forecast vs Actual
+├── Root Cause Analysis
+└── Data Explorer
+
+AI INTELLIGENCE
+├── AI Copilot
+├── Predictive Risk
+├── Similar Transfers
+├── AI Recommendations
+├── Knowledge Search
+└── AI Portfolio Brief
+
+REPORTING
+├── Management Reports
+├── Weekly Reporting
+├── Report Builder
+├── Scheduled Reports
+└── Export Center
+
+KNOWLEDGE
+├── Lessons Learned
+├── Transfer Playbooks
+├── Historical Projects
+└── Documentation
+
+OPERATIONS
+├── Data Quality
+├── Data Freshness
+├── Pipeline Monitoring
+├── Tableau Refresh
+├── API Health
+├── Platform Health
+└── Incident History
+
+ADMINISTRATION
+├── Users
+├── Roles
+├── Sites
+├── KPI Configuration
+├── Workflow Configuration
+├── AI Governance
+└── Audit Logs
+```
+
+This extends the navigation already established in the source plan while organizing AI, operations and transfer execution more clearly.
+
+---
+
+## 8. Transfer Lifecycle
+
+Every project should use a consistent lifecycle.
+
+```text
+TRANSFER REQUEST
+       │
+       ▼
+ASSESSMENT
+       │
+       ▼
+PLANNING
+       │
+       ▼
+PREPARATION
+       │
+   ┌───┴────┐
+   ▼        ▼
+SOURCE     TARGET
+READINESS  READINESS
+   │        │
+   └───┬────┘
+       ▼
+EXECUTION
+       │
+       ▼
+QUALIFICATION
+       │
+       ▼
+RAMP-UP
+       │
+       ▼
+STABILIZATION
+       │
+       ▼
+CLOSURE
+       │
+       ▼
+LESSONS LEARNED
+```
+
+Every phase can contain:
+
+| Object           | Purpose                     |
+| ---------------- | --------------------------- |
+| Milestones       | Formal progress checkpoints |
+| Actions          | Assigned operational work   |
+| Risks            | Potential threats           |
+| Issues           | Problems already occurring  |
+| Dependencies     | External blockers           |
+| Documents        | Required evidence           |
+| Readiness checks | Gate criteria               |
+| KPI snapshots    | Performance history         |
+| Comments         | Team collaboration          |
+| Approvals        | Controlled transitions      |
+| Audit events     | Traceability                |
+
+---
+
+## 9. Semiconductor-Specific Transfer Model
+
+The data model should understand the domain instead of treating everything as a generic project.
+
+The supplied research already identified product, technology, process, site, capacity and conversion as relevant transfer types.
+
+### Transfer classification
+
+```text
+Transfer Type
+├── Product Transfer
+├── Technology Transfer
+├── Process Transfer
+├── Site Transfer
+├── Capacity Transfer
+├── Equipment Conversion
+├── Wafer-size Conversion
+└── Manufacturing Conversion
+```
+
+### Manufacturing stage
+
+```text
+Frontend
+Backend
+End-to-End
+```
+
+Infineon's current manufacturing strategy includes both internal manufacturing and strategic external partnerships; its Tijuana announcement describes backend production as wafer sawing, assembly and testing.
+
+---
+
+## 10. Core Transfer Project Schema
+
+```text
+TRANSFER
+
+Identity
+├── transfer_id
+├── project_name
+├── description
+├── business_segment
+└── transfer_type
+
+Technology
+├── product_family
+├── technology
+├── process
+├── wafer_material
+├── wafer_diameter
+└── manufacturing_stage
+
+Network
+├── source_site
+├── target_site
+├── external_partner
+└── region
+
+Ownership
+├── transfer_manager
+├── project_manager
+├── site_owner
+└── team
+
+Timeline
+├── baseline_start
+├── baseline_end
+├── forecast_end
+├── actual_end
+└── current_phase
+
+Execution
+├── progress
+├── status
+├── qualification_status
+├── ramp_up_status
+└── stabilization_status
+
+Readiness
+├── product_readiness
+├── process_readiness
+├── equipment_readiness
+├── material_readiness
+├── documentation_readiness
+├── target_site_readiness
+└── qualification_readiness
+
+Performance
+├── schedule_variance
+├── milestone_adherence
+├── transfer_lead_time
+├── blocked_time
+└── rework_rate
+
+Risk
+├── risk_level
+├── risk_probability
+├── issue_count
+├── overdue_actions
+└── dependency_count
+
+Data
+├── last_update
+├── reporting_freshness
+├── completeness
+└── source_system
 ```
 
 ---
 
-## 6. Repository Structure
+## 11. Executive Command Center
+
+This should be the strongest screen.
+
+It answers:
+
+> **Where does management need to act today?**
+
+### Top KPI band
 
 ```text
-transferops/
-├── README.md
-├── Makefile
-├── docker-compose.yml
-├── .env.example
-├── docs/
-│   ├── MASTER_PLAN.md
-│   ├── architecture.md
-│   ├── data_model.md
-│   ├── metrics.md
-│   ├── security.md
-│   ├── live_vs_extract.md
-│   ├── demo_script.md
-│   └── interview_one_pager.md
-├── data/
-│   ├── generate.py
-│   ├── raw/
-│   └── golden/
-├── sql/
-│   ├── 00_schemas.sql
-│   ├── 01_raw.sql
-│   ├── 02_staging.sql
-│   ├── 03_core.sql
-│   ├── 04_metric_catalogue.sql
-│   ├── 05_metrics.sql
-│   ├── 06_marts.sql
-│   ├── 07_materialized_views.sql
-│   └── 08_rls.sql
-├── legacy/
-│   └── v0_legacy.sql
-├── etl/
-│   ├── ingest.py
-│   ├── transform.py
-│   ├── dq_checks.py
-│   └── run.py
-├── airflow/dags/
-├── services/
-│   ├── gateway/
-│   ├── project/
-│   ├── analytics/
-│   └── ai/
-├── agent/
-│   ├── schema.py
-│   ├── resolver.py
-│   ├── executor.py
-│   ├── retrieval.py
-│   ├── explain.py
-│   ├── policy.py
-│   └── evals/
-├── bi/
-│   ├── dashboards/
-│   ├── datasource/
-│   └── portal/
-├── security/keycloak/
-├── observability/
-│   ├── prometheus/
-│   ├── grafana/
-│   └── otel/
-├── kubernetes/
-├── tests/
-└── .github/workflows/
+Active Transfers
+On Track
+At Risk
+Delayed
+Average Readiness
+Milestone Adherence
+Schedule Variance
+Reporting Freshness
+```
+
+### Main content layout
+
+```text
+┌───────────────────────────────────────────────────────┐
+│ TRANSFER & CONVERSION COMMAND CENTER                  │
+├───────────────────────────────────────────────────────┤
+│ 128      92%       7        3       86%       98%    │
+│ Active   On Track   Risk     Delay   Ready     DQ      │
+├───────────────────────────────────────────────────────┤
+│                                                       │
+│ Portfolio Trend             Transfer Phase Distribution│
+│ [chart]                     [chart]                   │
+│                                                       │
+├───────────────────────────────────────────────────────┤
+│ Site-to-Site Transfer Network                         │
+│                                                       │
+│     Dresden ─────────────► Kulim                      │
+│        │                    ▲                         │
+│        ▼                    │                         │
+│     Villach ────────────────┘                         │
+│                                                       │
+├───────────────────────────────────────────────────────┤
+│ AI MANAGEMENT BRIEF                                  │
+│                                                       │
+│ 3 transfers require immediate attention.             │
+│ 5 projects show increasing schedule risk.            │
+│ Qualification is the largest current bottleneck.     │
+│                                  [Review Analysis →] │
+└───────────────────────────────────────────────────────┘
+```
+
+The source plan already establishes this page around management attention rather than raw counts.
+
+---
+
+## 12. Transfer Project Cockpit
+
+The project cockpit becomes the operational center for an individual transfer.
+
+### Header
+
+```text
+TCM-1042
+SiC Technology Transfer
+
+Villach → Kulim
+
+AT RISK | 76% Complete | Qualification Phase
+```
+
+### Summary band
+
+```text
+Baseline Completion     07 Oct
+Forecast Completion     18 Oct
+Schedule Variance       +11 days
+Readiness               78%
+Risk Probability        78%
+Data Freshness          100%
+```
+
+### Tabs
+
+```text
+Overview
+Timeline
+Milestones
+Readiness
+Risks & Issues
+Dependencies
+Actions
+Documents
+Analytics
+AI Insights
+History
 ```
 
 ---
 
-## 7. Canonical Data Model
+## 13. Transfer Readiness Engine
 
-### Project
-
-```text
-project_key
-project_id
-project_name
-transfer_type
-portfolio
-source_site
-target_site
-product_family
-complexity_class
-status
-authorised_start_date
-actual_start_date
-actual_finish_date
-created_at
-```
-
-### Milestone
+This should become one of the signature features.
 
 ```text
-milestone_key
-milestone_code
-milestone_name
-sequence_no
+TRANSFER READINESS
+
+Overall                   78%
+
+Product                   100%
+Process                    91%
+Equipment                  67%
+Material                   86%
+Qualification              61%
+Target Site                73%
+Documentation              96%
+
+STATUS
+AT RISK
 ```
 
-### Schedule Revision
+The original research identified readiness as a stronger management indicator than a generic project-health score.
 
-```text
-project_key
-revision_id
-revision_timestamp
-revision_reason
-planned_start
-planned_finish
-forecast_finish
-is_baseline
-is_rebaseline
-approved_by
-```
-
-### Project Snapshot
-
-```text
-project_key
-snapshot_date
-status
-forecast_finish
-current_stage
-risk_status
-progress_pct
-```
-
-### Forecast Snapshot
-
-```text
-project_key
-snapshot_date
-forecast_finish
-forecast_cycle_time_days
-forecast_horizon_days
-```
-
-### Fiscal Calendar
-
-```text
-calendar_date
-fiscal_week
-fiscal_month
-fiscal_quarter
-fiscal_year
-```
-
----
-
-## 8. Historical Model Rule
-
-The model must preserve:
-
-```text
-original baseline
-≠ approved rebaseline
-≠ latest plan
-≠ current forecast
-≠ actual outcome
-```
-
-This lets the platform answer:
-
-- What did we originally plan?
-- What changed?
-- When did it change?
-- How many times was the schedule revised?
-- What forecast existed 90/60/30 days before completion?
-- What was the final result?
-
----
-
-## 9. Canonical Metric Set
-
-### Tier 1 — Must Have
-
-| Metric | Definition |
-|---|---|
-| Actual Cycle Time | `actual_finish - actual_start` |
-| Forecast Cycle Time | `forecast_finish - actual_start` |
-| Schedule Deviation | `latest_planned_finish - baseline_finish` |
-| Completion Variance | `actual_finish - baseline_finish` |
-| Forecast Error | `actual_finish - forecast_finish_at_horizon` |
-| Throughput | completed projects per fiscal period |
-| WIP | open qualifying projects |
-| WIP Age | `snapshot_date - actual_start` |
-
-### Tier 2 — Strong Demo Metrics
-
-- On-Time Completion Rate
-- Replan Rate
-- Stage Cycle Time
-- Cycle-Time IQR
-- P90 Cycle Time
-- Forecast Bias
-- Median Absolute Forecast Error
-- Forecast accuracy by 30/60/90-day horizon
-
----
-
-## 10. DORA-Inspired Framing
-
-Use DORA as a **measurement philosophy**, not a literal metric copy.
-
-```text
-DORA:
-Throughput + Instability
-      ↓
-Understand delivery
-      ↓
-Improve
-      ↓
-Re-measure
-
-Transfer & Conversion Intelligence Platform:
-Flow + Predictability + Stability
-      ↓
-Understand transfer execution
-      ↓
-Find bottlenecks / forecasting problems
-      ↓
-Improve
-      ↓
-Re-measure
-```
-
-Conceptual mapping:
-
-| DORA concept | Transfer & Conversion Intelligence Platform analogue |
-|---|---|
-| Change lead time | Transfer cycle time |
-| Deployment frequency | Transfer throughput |
-| Recovery time | Deviation recovery |
-| Change fail rate | Schedule miss / deviation rate |
-| Rework rate | Replan / corrective rework rate |
-
-Preferred wording:
-
-> **DORA-inspired Transfer Performance Analytics**
-
----
-
-## 11. Metric Governance
-
-Every Tier-1 KPI must contain:
-
-```text
-metric_code
-business_name
-definition
-formula
-grain
-unit
-population
-exclusions
-valid_dimensions
-owner
-version
-effective_from
-known_limitations
-```
+### Readiness rules
 
 Example:
 
-```yaml
-metric_code: ACTUAL_TRANSFER_CYCLE_TIME
-business_name: Actual Transfer Cycle Time
-definition: Calendar days between actual start and actual completion
-grain: completed transfer project
-unit: days
-population: completed non-cancelled projects
-dimensions:
-  - fiscal_year
-  - transfer_type
-  - source_site
-  - target_site
-  - portfolio
-version: 1.0
-owner: transfer_management
+```text
+Equipment Readiness
+Weight: 20%
+
+Qualification Readiness
+Weight: 25%
+
+Process Readiness
+Weight: 15%
+
+Product Readiness
+Weight: 10%
+
+Target Site Readiness
+Weight: 15%
+
+Material Readiness
+Weight: 5%
+
+Documentation
+Weight: 10%
+```
+
+Weights should eventually be configurable by transfer type.
+
+---
+
+## 14. Transfer Network Intelligence
+
+A site-to-site view is particularly relevant to Infineon because its manufacturing strategy increasingly emphasizes digitally connected manufacturing locations and One Virtual Fab. The Dresden Smart Power Fab was explicitly described as linked with Villach for faster qualification and ramp-up.
+
+### Network screen
+
+```text
+                  Dresden
+                 ↙      ↘
+               16        21
+              ↙            ↘
+         Villach ────────► Kulim
+            │               │
+            │               ▼
+            └──────────► Melaka
+```
+
+Selecting a route shows:
+
+```text
+Villach → Kulim
+
+Active Transfers              18
+Completed Transfers           64
+Median Lead Time              143d
+On-Time Completion            91%
+Average Readiness             87%
+Schedule Variance             +4.2d
+Most Common Bottleneck        Qualification
 ```
 
 ---
 
-## 12. Data Quality
+## 15. Transfer Performance Framework
 
-### Ingestion
+Do not present these publicly as software DORA metrics.
 
-- uniqueness
-- completeness
-- type validation
-- status/domain validation
-- deduplication
-- freshness
+Use:
 
-### Core
+### **Transfer Performance Indicators — TPIs**
 
-- `actual_finish >= actual_start`
-- milestone sequence valid
-- baseline exists where required
-- frozen baseline is immutable
-- revision timestamps are monotonic
-- foreign keys resolve
-- one snapshot/project/day
+| TPI                     | Definition                                  |
+| ----------------------- | ------------------------------------------- |
+| Transfer Lead Time      | Start to production/ramp-up                 |
+| Phase Cycle Time        | Time spent in each phase                    |
+| Milestone Adherence     | % completed by baseline                     |
+| Schedule Variance       | Forecast/actual vs baseline                 |
+| Transfer Success Rate   | Successfully completed transfers            |
+| Qualification Lead Time | Time spent in qualification                 |
+| Ramp-Up Lead Time       | Qualification to stable production          |
+| Blocked Time            | Time lost to unresolved dependencies        |
+| Rework Rate             | Work repeated after failed/changed activity |
+| Risk Resolution Time    | Time to close significant risks             |
+| Change Frequency        | Number of baseline changes                  |
+| Readiness Score         | Preparedness for transfer execution         |
+| Forecast Accuracy       | Forecast vs actual completion               |
+| Reporting Freshness     | Time since latest valid update              |
+| Data Completeness       | Required-field completeness                 |
 
-### Metric
-
-- cycle time is non-negative
-- completion variance only exists for completed projects
-- throughput reconciles to detail
-- distribution population reconciles
-- forecast error requires an actual outcome
-
----
-
-## 13. Golden-Project Regression Set
-
-Maintain 20–50 projects covering:
-
-- normal on-time
-- late
-- early
-- cancelled
-- multiple revisions
-- approved rebaseline
-- missing forecast
-- long-running
-- cross-fiscal-year
-- outlier
-- rework
-- open/in-progress
-
-Every metric change reruns this suite.
+The existing design already establishes this type of Transfer Performance Framework.
 
 ---
 
-## 14. Before / After Modernization
-
-Create:
+## 16. Tableau Analytics Architecture
 
 ```text
-legacy/v0_legacy.sql
+                ORACLE
+                   │
+                   ▼
+          CURATED REPORTING VIEWS
+                   │
+        ┌──────────┴──────────┐
+        ▼                     ▼
+     TABLEAU              WEB APIs
+        │                     │
+        └──────────┬──────────┘
+                   ▼
+          TRANSFER INTELLIGENCE
 ```
 
-The legacy version deliberately includes:
-
-- inline KPI formulas
-- magic filters
-- duplicated logic
-- current-state schedule only
-- poor separation
-
-Then show:
+### Tableau dashboard families
 
 ```text
-V0 legacy result
-      ==
-V1 governed result
+Executive Portfolio
+Transfer Performance
+Site Performance
+Qualification Analytics
+Ramp-Up Performance
+Milestone Analytics
+Risk Analytics
+Conversion Analytics
+Forecast vs Actual
+Historical Trends
+Data Quality
 ```
 
-on the golden portfolio.
-
-The business number matches, but V1 is:
-
-```text
-historical
-testable
-versioned
-reusable
-secure
-AI-ready
-```
-
-This is one of the highest-value demo moments.
+Tableau can be embedded in the web application or opened in context.
 
 ---
 
-## 15. BI Design
+## 17. AI Intelligence Architecture
 
-### Management Dashboard
+AI should be divided into four intelligence levels:
 
-Cards:
+```text
+DESCRIPTIVE
+What happened?
+      │
+      ▼
+DIAGNOSTIC
+Why did it happen?
+      │
+      ▼
+PREDICTIVE
+What is likely to happen?
+      │
+      ▼
+PRESCRIPTIVE
+What should we do?
+```
 
-- Total Projects
-- Active
-- Completed
-- At Risk
-- Delayed
-- Median Cycle Time
-- Median Schedule Deviation
-- Forecast Accuracy
-
-Charts:
-
-- portfolio health
-- throughput trend
-- on-time rate
-- cycle-time trend
-- at-risk portfolio
-
-### Technical / PMO Dashboard
-
-- FY cycle-time box plots
-- original vs latest schedule
-- forecast vs actual
-- forecast accuracy by horizon
-- schedule revision history
-- milestone stage cycle time
-- project drill-down
-- data-quality health
-
-Filters:
-
-- Fiscal Year
-- Transfer Type
-- Portfolio
-- Source Site
-- Target Site
-- Product Family
-- Status
-- Complexity Class
+This progression was already established in the planning material and should remain central.
 
 ---
 
-## 16. Live vs Extract Strategy
+## 18. AI Capability A — Portfolio Copilot
 
-Choose based on:
+Users can ask:
 
 ```text
-freshness value
-vs
-query cost + concurrency + performance
+Which projects require management attention?
+
+What changed since last week's reporting cycle?
+
+Which transfers into Kulim have readiness below 80%?
+
+Which milestones are likely to miss their dates?
+
+Why did milestone adherence decline this quarter?
+
+Compare Villach → Kulim with Dresden → Kulim.
+
+What are the largest unresolved dependencies?
+
+Generate the weekly TCM management brief.
 ```
 
-| View | Suggested mode |
-|---|---|
-| Current project status | Live |
-| Urgent operational view | Live |
-| Multi-year box plots | Pre-aggregated / extract |
-| Portfolio trends | Extract |
-| Executive periodic report | Extract |
-| Reconciliation/debug | Live |
+The responses must be grounded in visible data.
 
 ---
 
-## 17. Security Model
+## 19. AI Capability B — Ask Your Data
 
-Separate:
-
-```text
-Authentication → Who are you?
-Role           → What type of user are you?
-Entitlement    → Which data may you see?
-Action         → What may you do?
-```
-
-Suggested roles:
-
-```text
-TRANSFER_VIEWER
-TRANSFER_ANALYST
-TRANSFER_MANAGER
-REPORT_DEVELOPER
-DATA_ENGINEER
-PLATFORM_ADMIN
-```
-
-Entitlement dimensions:
-
-```text
-portfolio
-site
-transfer_type
-project
-```
-
-The AI assistant receives the same resolved security context.
-
----
-
-## 18. Demo Identity Flow
-
-```text
-Keycloak
-   ↓
-OIDC token
-   ↓
-FastAPI
-   ↓
-resolved identity / role / entitlement
-   ↓
-DB row filtering
-   ↓
-BI + Agent
-```
-
-Use fictional accounts:
-
-```text
-manager.demo
-analyst.demo
-developer.demo
-```
-
----
-
-## 19. AI Assistant
-
-### Governing rule
-
-> The model does not define metrics, decide permissions, or perform business arithmetic when deterministic tools can do it.
+Natural-language analytical questions are converted into **governed read-only queries**.
 
 Flow:
 
 ```text
-Question
-  ↓
-Intent parser
-  ↓
-Metric resolver
-  ↓
-Filter resolver
-  ↓
-Authorization check
-  ↓
-Governed query object
-  ↓
-Policy validator
-  ↓
-Approved executor
-  ↓
-Result validator
-  ↓
-Explanation + provenance
+User question
+     ↓
+Intent classification
+     ↓
+Semantic metric layer
+     ↓
+SQL generation
+     ↓
+SQL validator
+     ↓
+Read-only execution
+     ↓
+Result validation
+     ↓
+Narrative explanation
+     ↓
+Source / query traceability
 ```
 
----
-
-## 20. Metric Query Object
-
-```json
-{
-  "metric": "ACTUAL_TRANSFER_CYCLE_TIME",
-  "aggregation": "median",
-  "group_by": ["fiscal_year", "transfer_type"],
-  "filters": {
-    "status": ["COMPLETED"]
-  }
-}
-```
-
-The backend converts this object into parameterized SQL.
-
----
-
-## 21. Agent Tools
-
-```python
-get_metric()
-compare_metric()
-get_distribution()
-get_project()
-get_schedule_history()
-get_delayed_projects()
-list_outliers()
-explain_dashboard()
-search_metric_definition()
-```
-
-Avoid unrestricted text-to-SQL.
-
----
-
-## 22. RAG / Semantic Knowledge
-
-Store:
-
-- metric definitions
-- metric aliases
-- business glossary
-- fiscal rules
-- valid filters
-- dashboard descriptions
-- lineage
-- approved examples
-- known limitations
-
-Suggested Qdrant collections:
+Never:
 
 ```text
-metric_definitions
-dashboard_metadata
-architecture_docs
-user_guides
+LLM → unrestricted Oracle credentials
 ```
 
 ---
 
-## 23. AI Response Contract
+## 20. AI Capability C — Risk Prediction
 
-Every numerical answer should show:
+Traditional machine learning should handle structured predictive risk.
+
+Possible features:
 
 ```text
-Metric
-Metric version
-Definition
-Population
+Current schedule variance
+Milestone delay history
+Transfer type
+Source site
+Target site
+Technology
+Current lifecycle phase
+Equipment readiness
+Qualification readiness
+Critical dependency count
+Risk count
+Overdue action count
+Reporting freshness
+Historical site performance
+Historical similar-transfer performance
+```
+
+Possible model sequence:
+
+```text
+Phase 1
+Transparent weighted scoring
+
+Phase 2
+Logistic Regression / Random Forest
+
+Phase 3
+XGBoost / LightGBM
+
+Phase 4
+Calibrated enterprise model
+```
+
+Example output:
+
+```text
+TARGET DATE RISK
+
+TCM-1042
+
+Probability of Missing Baseline
+78%
+
+Predicted Completion
+18 Oct 2026
+
+Expected Delay
++11 days
+
+Top Drivers
+1. Qualification readiness
+2. Equipment readiness
+3. Critical dependency
+4. Previous milestone delays
+```
+
+---
+
+## 21. AI Capability D — Root Cause Intelligence
+
+Example:
+
+```text
+Milestone Adherence
+91% → 84%
+
+WHY?
+
+Qualification delays        43%
+Equipment readiness         26%
+Supplier dependencies       18%
+Other                       13%
+
+Largest contributor:
+Three qualification-stage projects.
+```
+
+This takes the platform beyond descriptive BI.
+
+---
+
+## 22. AI Capability E — Prescriptive Recommendations
+
+Example:
+
+```text
+PROJECT TCM-1042
+
+Risk
+HIGH
+
+Primary Driver
+Qualification Readiness
+
+Recommended Actions
+
+1. Resolve equipment readiness action A-118.
+2. Review qualification capacity at target site.
+3. Escalate supplier dependency.
+4. Recalculate forecast after next qualification checkpoint.
+
+AI Confidence
+High
+
+[Reject] [Review] [Approve]
+```
+
+AI proposes. Humans decide.
+
+---
+
+## 23. AI Capability F — Historical Similarity
+
+This should become another signature feature.
+
+```text
+CURRENT PROJECT
+
+Technology      SiC
+Route           Villach → Kulim
+Phase           Qualification
+Issue           Equipment readiness
+
+SIMILAR TRANSFERS
+
+TCM-0834       91%
+TCM-0918       87%
+TCM-0972       79%
+
+Historical Pattern
+
+3 similar projects experienced
+equipment-readiness delays.
+
+Median impact:
++12 days
+
+Most successful mitigation:
+Parallel qualification preparation.
+```
+
+The source research already identifies historical similarity as more useful than generic RAG for this use case.
+
+---
+
+## 24. AI Capability G — Lessons Learned Knowledge
+
+At closure:
+
+```text
+Transfer Complete
+       ↓
+Lessons Learned Form
+       ↓
+AI Structuring
+       ↓
+Validated Knowledge Record
+       ↓
+Embedding / Search Index
+       ↓
+Future Similar Transfers
+       ↓
+Recommended Historical Cases
+```
+
+Capture:
+
+```text
+What went well?
+What caused delay?
+What was unexpected?
+How was the issue resolved?
+Which mitigation worked?
+What should be done differently?
+What should future projects reuse?
+```
+
+---
+
+## 25. RAG / Knowledge Search
+
+RAG is suitable for **unstructured enterprise content**, not core project KPIs.
+
+Sources:
+
+```text
+Transfer procedures
+Reporting documentation
+Process guidelines
+Lessons learned
+Project reports
+Meeting summaries
+Qualification procedures
+Troubleshooting guides
+Operating procedures
+```
+
+The supplied design already identifies these as the correct RAG use cases.
+
+---
+
+## 26. Automated Management Reporting
+
+A report generator should create:
+
+```text
+TRANSFER & CONVERSION MANAGEMENT
+Weekly Portfolio Report
+Week 33 — 2026
+
+Executive Summary
+
+Portfolio KPIs
+
+Critical Changes
+
+At-Risk Transfers
+
+Milestone Performance
+
+Readiness
+
+Top Risks
+
+Root Cause Analysis
+
+Forecast
+
+Recommended Actions
+
+Data Quality Notes
+```
+
+Outputs:
+
+```text
+PDF
+PowerPoint
+Excel
+Email
+```
+
+---
+
+## 27. Data Quality Center
+
+Data trust must be visible.
+
+```text
+DATA QUALITY
+
+Overall                 98.1%
+
+Completeness            98.7%
+Freshness               96.9%
+Consistency             97.8%
+Validity                99.1%
+
+ISSUES
+
+12 Missing target dates
+7  Projects stale >14 days
+3  Invalid lifecycle transitions
+2  Missing project owners
+4  Inconsistent qualification values
+```
+
+The existing plan already treats data quality as a first-class reporting capability rather than a backend-only concern.
+
+---
+
+## 28. Operational Sustaining Center
+
+This directly supports the job requirement around **operational sustaining**.
+
+Infineon's GSD organization explicitly describes operating digital solutions to agreed service levels, so platform-health visibility is highly relevant.
+
+```text
+PLATFORM HEALTH
+
+Oracle Database             Healthy
+BI Portal                   Healthy
+Backend API                 Healthy
+ETL / Airflow               Healthy
+Tableau Refresh             Healthy
+AI Gateway                  Healthy
+
+Last Oracle Sync            6 min
+Last Data Pipeline          8 min
+Last Tableau Refresh        13 min
+
+Pipeline Success            99.8%
+Data Freshness              99.4%
+Availability                99.9%
+
+Failed Jobs                 0
+Data Quality Issues         3
+```
+
+---
+
+## 29. Operations Drill-Down
+
+```text
+Pipeline Runs
+Failed Pipelines
+Data Source Health
+Oracle Connectivity
+Tableau Refresh
+API Availability
+Application Errors
+Job Duration
+Data Validation
+AI Usage
+LLM Cost
+Model Errors
+Security Events
+Audit Trail
+```
+
+---
+
+## 30. High-Level Technical Architecture
+
+```text
+                              USERS
+                                │
+                                ▼
+                  ┌─────────────────────────┐
+                  │   NEXT.JS WEB CLIENT    │
+                  │ React + TypeScript      │
+                  └────────────┬────────────┘
+                               │
+                               ▼
+                  ┌─────────────────────────┐
+                  │      API GATEWAY        │
+                  └────────────┬────────────┘
+                               │
+          ┌────────────────────┼─────────────────────┐
+          ▼                    ▼                     ▼
+ ┌────────────────┐   ┌────────────────┐   ┌────────────────┐
+ │ TRANSFER API   │   │ REPORTING API  │   │ AI GATEWAY     │
+ │ FastAPI        │   │ FastAPI        │   │ Python         │
+ └───────┬────────┘   └───────┬────────┘   └───────┬────────┘
+         │                    │                    │
+         │                    │         ┌──────────┼──────────┐
+         │                    │         ▼          ▼          ▼
+         │                    │       LLM         ML        RULES
+         │                    │
+         └────────────────────┼───────────────────────────────┐
+                              ▼                               ▼
+                 ┌─────────────────────┐             ┌────────────────┐
+                 │ ORACLE DATA LAYER   │             │ KNOWLEDGE      │
+                 │ System of Record    │             │ Search / RAG   │
+                 └─────────┬───────────┘             └────────────────┘
+                           ▲
+                           │
+                 ┌─────────┴──────────┐
+                 │ DATA INTEGRATION   │
+                 │ Airflow / Python   │
+                 └─────────┬──────────┘
+                           │
+              ┌────────────┼───────────────┐
+              ▼            ▼               ▼
+          Oracle/BI     Excel/CSV      Other Sources
+
+                           │
+                           ▼
+                      TABLEAU
+```
+
+---
+
+## 31. Recommended Technology Stack
+
+| Layer           | Recommended                                 |
+| --------------- | ------------------------------------------- |
+| Frontend        | Next.js + React + TypeScript                |
+| UI              | Tailwind CSS + enterprise component library |
+| Backend         | FastAPI + Python                            |
+| Production DB   | Oracle                                      |
+| Prototype DB    | PostgreSQL with Oracle-compatible model     |
+| ORM             | SQLAlchemy                                  |
+| Data processing | Python + Pandas                             |
+| Workflow        | Apache Airflow                              |
+| Analytics       | Tableau                                     |
+| Cache           | Redis                                       |
+| AI gateway      | Python service                              |
+| LLM             | OpenAI-compatible abstraction               |
+| ML              | scikit-learn + XGBoost/LightGBM             |
+| RAG             | pgvector initially                          |
+| SSO             | OIDC / enterprise identity                  |
+| Authorization   | RBAC                                        |
+| Containers      | Docker                                      |
+| Orchestration   | Kubernetes for full production target       |
+| IaC             | Terraform                                   |
+| CI/CD           | GitHub Actions / enterprise equivalent      |
+| Metrics         | Prometheus                                  |
+| Dashboards      | Grafana                                     |
+| Logs            | Loki or ELK                                 |
+| Tracing         | OpenTelemetry                               |
+| Secrets         | enterprise vault / secret manager           |
+
+The original plan proposed a similar full-enterprise stack while correctly noting that the prototype should be simplified.
+
+---
+
+## 32. Database Domain Model
+
+Core entities:
+
+```text
+transfer_project
+transfer_type
+transfer_phase
+site
+product
+technology
+process
+
+project_milestone
+project_action
+project_risk
+project_issue
+project_dependency
+project_document
+
+readiness_assessment
+readiness_dimension
+
+qualification_status
+rampup_status
+
+kpi_definition
+kpi_result
+kpi_snapshot
+
+project_status_history
+project_update
+
+lesson_learned
+
+ai_prediction
+ai_recommendation
+ai_feedback
+ai_query_log
+
+data_quality_rule
+data_quality_result
+
+pipeline
+pipeline_run
+system_health
+
+user
+role
+permission
+
+audit_event
+```
+
+---
+
+## 33. Security Architecture
+
+### Authentication
+
+```text
+Enterprise SSO
+      ↓
+OIDC
+      ↓
+Application Session
+```
+
+### Authorization
+
+RBAC + resource-level restrictions.
+
+Roles:
+
+```text
+Executive
+Transfer Manager
+Project Manager
+Site Manager
+Analyst
+Operations
+Administrator
+Viewer
+```
+
+Potential future extension:
+
+```text
+Role
+ +
+Site
+ +
+Business Segment
+ +
+Project Assignment
+```
+
+---
+
+## 34. AI Governance
+
+AI must be designed as an enterprise-controlled feature from day one.
+
+Required controls:
+
+```text
+Read-only data access by default
+
+No unrestricted Oracle access
+
+Approved semantic layer
+
+SQL validation
+
+Allowed table/view list
+
+Row-level access enforcement
+
+Prompt/response audit
+
+Sensitive-data masking
+
+Source traceability
+
+Model/version tracking
+
+Confidence indicator
+
+Human approval for writes
+
+Cost/token monitoring
+
+AI feedback capture
+
+Evaluation dataset
+
+Prompt-injection protections
+```
+
+These controls were already identified in the source plan as essential for enterprise maturity.
+
+---
+
+## 35. Human-in-the-Loop Design
+
+For important changes:
+
+```text
+AI recommends:
+Risk MEDIUM → HIGH
+
+Reason:
+Qualification delay +
+unresolved dependency.
+
+[Reject]
+
+[Review]
+
+[Approve]
+```
+
+Never silently change:
+
+```text
+Project status
+Baseline
+Forecast
+Risk level
+Readiness
+Milestone state
+Owner
+```
+
+without approved workflow.
+
+---
+
+## 36. Audit Architecture
+
+Every critical action generates:
+
+```text
+event_id
+timestamp
+user
+role
+action
+entity
+previous_value
+new_value
+source
+ip/session
+ai_generated
+approval_reference
+```
+
+Example:
+
+```text
+12 Aug 14:31
+
+User
+Project Manager
+
+Changed milestone
+Qualification
+
+15 Aug → 26 Aug
+```
+
+AI events must be equally traceable.
+
+---
+
+## 37. UI / UX Master Design System
+
+The UI should reflect the **current clean Infineon digital aesthetic** rather than a generic dark AI dashboard.
+
+### Core palette
+
+```text
+Primary Teal        #0A8276
+Primary Dark        #076B62
+Primary Light       #EAF5F3
+
+Page                #F7F7F7
+Surface             #FFFFFF
+Border              #E3E5E7
+
+Text Primary        #111111
+Text Secondary      #4A4A4A
+
+Success             #2E7D32
+Warning             #F59E0B
+Critical            #D32F2F
+```
+
+This visual direction is already documented in the source plan.
+
+---
+
+## 38. Layout Style
+
+Desktop target:
+
+```text
+Header         64px
+Sidebar        240–260px
+Content max    1440px
+Card radius    8–12px
+Grid gap       20–24px
+Page padding   24–32px
+```
+
+Use:
+
+```text
+white space
+subtle borders
+light shadows
+clear hierarchy
+data density without visual clutter
+```
+
+Avoid:
+
+```text
+heavy gradients
+neon AI effects
+dark dashboard background
+oversized rounded SaaS cards
+excessive animations
+glassmorphism
+```
+
+The interface should feel:
+
+> **Industrial + analytical + modern + controlled**
+
+---
+
+## 39. Chart System
+
+Primary chart series:
+
+```text
+Teal
+Dark teal
+Blue
+Green
+Amber
+Red
+Neutral gray
+```
+
+Use red only for true critical conditions.
+
+Do not use red merely as decoration.
+
+Every chart must provide:
+
+```text
+Title
+Unit
+Date range
 Filters
-Comparison period
-Data as-of
-Project count
-Tool/source
-```
-
-This is what makes the agent genuinely self-explaining.
-
----
-
-## 24. AI Security
-
-Treat as untrusted:
-
-```text
-user input
-retrieved text
-project comments
-LLM output
-```
-
-Trusted:
-
-```text
-policy engine
-metric catalogue
-authorization layer
-query executor
-```
-
-Agent DB access:
-
-```text
-READ ONLY
-allowed schemas only
-no DDL
-no INSERT/UPDATE/DELETE
-timeout
-row limit
-RBAC independent of prompt
+Tooltip
+Data source
+Last refresh
+Export
 ```
 
 ---
 
-## 25. Observability
+## 40. Global Filter Model
 
-### Pipeline
-
-- last successful load
-- duration
-- processed/rejected rows
-- source freshness
-- duplicates
-- null-rate trend
-- failures
-
-### DB
-
-- query latency
-- materialized-view refresh
-- slow queries
-- storage growth
-
-### BI
-
-- dashboard load time
-- failed refreshes
-- usage
-- unused dashboards
-
-### AI
-
-- latency
-- tool success
-- metric-resolution accuracy
-- filter-resolution accuracy
-- numeric accuracy
-- abstention
-- prompt-injection detections
-- security violations
-- human corrections
-
----
-
-## 26. Airflow
-
-One primary DAG:
+Most analytics pages should share:
 
 ```text
-ingest_transfer_data
-        ↓
-validate_raw
-        ↓
-build_staging
-        ↓
-build_core
-        ↓
-calculate_metrics
-        ↓
-build_marts
-        ↓
-refresh_semantic_index
+Date Period
+Business Segment
+Transfer Type
+Manufacturing Stage
+Source Site
+Target Site
+Technology
+Product Family
+Lifecycle Phase
+Status
+Risk
+Transfer Manager
 ```
 
-Demonstrate:
-
-- dependencies
-- retries
-- failed DQ batch
-- successful rerun
-- backfill concept
+Filters must persist when navigating into a detail screen.
 
 ---
 
-## 27. Kubernetes
+## 41. Search
 
-Use kind or k3d.
-
-Deploy only components that remain stable:
+Global search should cover:
 
 ```text
-gateway
-analytics-service
-ai-service
-dashboard
-qdrant
-keycloak
+Transfer ID
+Project name
+Product
+Technology
+Site
+Manager
+Risk
+Milestone
+Document
+Lesson learned
 ```
 
-PostgreSQL and Airflow may remain in Docker Compose if moving them into Kubernetes risks demo stability.
-
----
-
-## 28. CI/CD
+Use command-style access:
 
 ```text
-push
- ↓
-lint
- ↓
-unit tests
- ↓
-SQL tests
- ↓
-golden-project tests
- ↓
-RBAC tests
- ↓
-agent evals
- ↓
-Docker build
- ↓
-security scan
+Ctrl/Cmd + K
 ```
 
 ---
 
-## 29. Fine-Tuning
+## 42. Notifications
 
-Fine-tuning is **not critical path**.
-
-If included:
-
-- use a small model
-- use LoRA/QLoRA
-- train only on synthetic KPI explanation examples
-- keep the full system functional without the tuned model
-
-Production default:
+Notification types:
 
 ```text
-governed tools + RAG
+Critical risk
+Milestone overdue
+Readiness threshold breached
+Prediction changed
+Data quality problem
+Pipeline failure
+Report generated
+Approval required
+Project update stale
 ```
 
-Fine-tuning is only an experiment.
-
----
-
-## 30. Current Project State
-
-According to the existing project plan, Phase 1 is complete:
-
-- data foundation
-- governed metric core
-- metric dictionary
-- marts
-- synthetic project generation
-- schedule revisions
-- project snapshots
-- golden reconciliation
-- DuckDB development
-- PostgreSQL deployment
-
-Therefore the next work should maximize **demo leverage**.
-
----
-
-## 31. Refined Critical Path
+Delivery:
 
 ```text
-1. Foundation                         ✅ done
-       ↓
-2. Complete metrics + v0 legacy contrast
-       ↓
-3. Management + technical BI
-       ↓
-4. Self-explaining agent
-       ↓
-5. RBAC + audit
-       ↓
-6. Airflow + observability
-       ↓
-7. Kubernetes + CI/CD
-       ↓
-8. Polish + interview package
-```
+In-app first
 
-Airflow, Kubernetes, extra microservices, and fine-tuning must never block the core demonstration.
-
----
-
-## 32. 48-Hour Build Plan
-
-### Day 1 — Build the Winning Demo
-
-#### 08:00–10:00 — Stabilize Existing Foundation
-
-- run all current tests
-- verify DuckDB/PostgreSQL paths
-- clean repo
-- freeze a baseline commit
-
-#### 10:00–13:00 — Complete Metrics
-
-Add:
-
-- forecast accuracy by horizon
-- WIP / WIP age
-- replan rate
-- stage cycle time
-- IQR / P90
-- metric versioning
-
-#### 13:00–15:00 — Build Legacy Contrast
-
-Create `legacy/v0_legacy.sql`.
-
-Validate:
-
-```text
-legacy number == governed number
-```
-
-for the golden set.
-
-#### 15:00–18:00 — BI
-
-Build:
-
-1. Management dashboard
-2. Technical / PMO dashboard
-
-Must show:
-
-- FY cycle-time box plot
-- original vs latest
-- forecast vs actual
-- portfolio health
-
-#### 18:00–21:00 — Agent Core
-
-Build:
-
-- query object
-- metric resolver
-- filter resolver
-- deterministic executor
-- response contract
-
-Test:
-
-```text
-What is cycle time?
-Compare FY25 vs FY26.
-Show delayed projects.
-Which transfer type has the highest P90?
-```
-
-#### 21:00–23:00 — Minimum Security
-
-- Keycloak or lightweight JWT
-- analyst and manager personas
-- portfolio scoping
-- one denied cross-portfolio test
-
-### End-of-Day-1 Gate
-
-Must have:
-
-```text
-DATA
-METRICS
-BEFORE/AFTER
-DASHBOARD
-AGENT
-RBAC
+Future:
+Email
+Microsoft Teams
 ```
 
 ---
 
-### Day 2 — Enterprise Depth
+## 43. Observability
 
-#### 07:00–09:00 — Agent Evaluation
-
-Create 20–40 benchmark questions with expected:
+### Application
 
 ```text
-metric
-filters
-numeric result
-abstention behavior
+Request latency
+Error rate
+API throughput
+Session failures
+Database latency
+Cache performance
 ```
-
-#### 09:00–11:00 — RAG
-
-Index:
-
-- metric dictionary
-- dashboard metadata
-- business glossary
-- fiscal rules
-
-#### 11:00–13:00 — Airflow
-
-Build the end-to-end DAG.
-
-#### 13:00–15:00 — Audit + Observability
-
-- agent audit table
-- service metrics
-- Prometheus
-- one Grafana dashboard
-
-#### 15:00–17:00 — Kubernetes
-
-Deploy stable services only.
-
-#### 17:00–18:00 — CI/CD
-
-Get GitHub Actions green.
-
-#### 18:00–20:00 — Documentation
-
-Finish:
-
-- README
-- architecture
-- metric catalogue
-- security
-- one-page proposal
-- demo script
-
-#### 20:00–21:00 — Fine-Tuning Stretch
-
-Only if all core items are green.
-
-#### 21:00–23:00 — Rehearsal
-
-No new features after 22:00.
-
----
-
-## 33. Minimum Winning Demo
-
-If time becomes tight, stop at:
-
-1. synthetic transfer data
-2. schedule history
-3. metric catalogue
-4. cycle-time + schedule-deviation metrics
-5. golden reconciliation
-6. legacy-vs-modern comparison
-7. management dashboard
-8. fiscal-year box plot
-9. read-only AI assistant
-10. metric + filters + timestamp in answers
-11. one RBAC demo
-12. clean README + architecture diagram
-
-A smaller complete platform is stronger than fifteen half-working technologies.
-
----
-
-## 34. Stretch Priority
-
-```text
-1. Airflow
-2. Prometheus / Grafana
-3. Kubernetes
-4. Portal embedding
-5. Extra microservices
-6. Fine-tuning
-```
-
----
-
-## 35. Definition of Done
 
 ### Data
 
-- [ ] 100–300 synthetic projects
-- [ ] schedule revisions
-- [ ] forecast snapshots
-- [ ] milestone events
-- [ ] fiscal calendar
-- [ ] DQ tests
-
-### Metrics
-
-- [ ] cycle time
-- [ ] schedule deviation
-- [ ] completion variance
-- [ ] forecast error
-- [ ] throughput
-- [ ] WIP / WIP age
-- [ ] P50/P75/P90
-- [ ] replan rate
-- [ ] metric versioning
-
-### BI
-
-- [ ] management dashboard
-- [ ] technical dashboard
-- [ ] FY box plot
-- [ ] original-vs-latest
-- [ ] forecast view
-- [ ] drill-down
+```text
+Pipeline duration
+Pipeline failure
+Row count change
+Schema drift
+Freshness
+Completeness
+Validation failures
+```
 
 ### AI
 
-- [ ] metric resolution
-- [ ] filter resolution
-- [ ] deterministic tools
-- [ ] RAG definitions
-- [ ] filters shown
-- [ ] data timestamp shown
-- [ ] read-only enforcement
-- [ ] injection test
-
-### Security
-
-- [ ] identity provider
-- [ ] roles
-- [ ] entitlements
-- [ ] cross-scope denial
-
-### Platform
-
-- [ ] Docker Compose
-- [ ] Airflow DAG
-- [ ] health endpoints
-- [ ] CI pipeline
-- [ ] observability
-- [ ] Kubernetes if stable
-
-### Interview Package
-
-- [ ] one-page proposal
-- [ ] simplified architecture
-- [ ] full architecture
-- [ ] 5-minute demo runbook
-- [ ] three-week production pilot
-- [ ] reproducible README
-
----
-
-## 36. Five-Minute Demo
-
-### 0:00–0:40 — Problem
-
-> This is a project-performance system, not just a visualization layer. I focused on preserving history, defining metrics once, and making the reporting self-explaining.
-
-### 0:40–1:20 — Legacy vs Governed
-
-Show the same number from `v0_legacy` and the governed metric layer.
-
-### 1:20–2:10 — Dashboard
-
-Show:
-
-- portfolio health
-- FY box plot
-- schedule deviation
-- forecast accuracy
-
-### 2:10–3:20 — Agent
-
-Ask:
-
-> Which transfer type has the highest median cycle time in FY26?
-
-Show:
-
-- metric
-- definition
-- filters
-- result
-- data timestamp
-
-### 3:20–4:00 — RBAC
-
-Switch persona and show restricted data.
-
-### 4:00–4:40 — Engineering Quality
-
-Show tests, Airflow, audit, CI.
-
-### 4:40–5:00 — Close
-
-> BI and AI both consume the same governed metric foundation. The agent does not invent business logic and cannot bypass security.
-
----
-
-## 37. Strong Interview Statement
-
-> **I separated project data, business calculations, and presentation so metrics like cycle time are defined once and reused everywhere. Then I put a read-only, permission-aware AI assistant on top of those trusted metrics so users can ask questions without already knowing the exact filters.**
-
----
-
-## 38. Production Evolution
-
-### 0–3 months
-
 ```text
-source inventory
-lineage
-metric glossary
-golden projects
-one production KPI family
+Request volume
+Latency
+Token usage
+Cost
+Model errors
+SQL rejection rate
+Hallucination evaluation
+User feedback
 ```
 
-### 3–6 months
+---
+
+## 44. Data Engineering Flow
 
 ```text
-clean data foundation
-schedule history
-DQ framework
+Sources
+   ↓
+Ingestion
+   ↓
+Validation
+   ↓
+Transformation
+   ↓
+Curated Oracle Views
+   ↓
+Semantic KPI Layer
+   ↓
+┌──────────┬───────────┬────────────┐
+▼          ▼           ▼            ▼
+Web     Tableau       AI           Reports
+```
+
+Do not expose messy raw tables directly to every consumer.
+
+---
+
+## 45. KPI Semantic Layer
+
+Create centrally defined metrics.
+
+Example:
+
+```text
+Metric:
+Milestone Adherence
+
+Formula:
+milestones_completed_on_or_before_baseline
+/
+completed_milestones
+
+Owner:
+TCM Reporting
+
+Frequency:
+Daily
+
+Dimension support:
+Site
+Transfer Type
+Project
+Business Segment
+Technology
+```
+
+This guarantees that:
+
+```text
+Tableau
+Web dashboards
+AI answers
+PDF reports
+```
+
+all use the same KPI definition.
+
+---
+
+## 46. API Design
+
+Example routes:
+
+```text
+/api/v1/transfers
+/api/v1/transfers/{id}
+
+/api/v1/milestones
+/api/v1/readiness
+/api/v1/risks
+/api/v1/issues
+/api/v1/dependencies
+/api/v1/actions
+
+/api/v1/sites
+/api/v1/network
+
+/api/v1/kpis
+/api/v1/analytics
+
+/api/v1/reports
+
+/api/v1/ai/chat
+/api/v1/ai/explain
+/api/v1/ai/predict
+/api/v1/ai/similar
+/api/v1/ai/recommend
+
+/api/v1/data-quality
+/api/v1/platform-health
+
+/api/v1/audit
+```
+
+---
+
+## 47. AI Service Separation
+
+```text
+AI Gateway
+    │
+    ├── Copilot Service
+    ├── NL Analytics Service
+    ├── Risk Prediction Service
+    ├── Similarity Service
+    ├── RAG Service
+    ├── Recommendation Service
+    └── Report Narrative Service
+```
+
+The frontend should never call the model provider directly.
+
+---
+
+## 48. Development Repository Structure
+
+```text
+transfer-intelligence/
+│
+├── apps/
+│   ├── web/
+│   └── api/
+│
+├── services/
+│   ├── ai/
+│   ├── ml/
+│   └── reporting/
+│
+├── data/
+│   ├── airflow/
+│   ├── transformations/
+│   └── quality/
+│
+├── packages/
+│   ├── ui/
+│   ├── schemas/
+│   └── config/
+│
+├── database/
+│   ├── migrations/
+│   ├── views/
+│   └── seed/
+│
+├── infrastructure/
+│   ├── docker/
+│   ├── kubernetes/
+│   └── terraform/
+│
+├── monitoring/
+│
+├── tests/
+│
+└── docs/
+```
+
+---
+
+## 49. Environment Model
+
+```text
+LOCAL
+↓
+DEVELOPMENT
+↓
+TEST
+↓
+STAGING
+↓
+PRODUCTION
+```
+
+Each has isolated:
+
+```text
+database
+secrets
+AI configuration
+SSO client
+storage
+monitoring
+```
+
+---
+
+## 50. CI/CD
+
+Pipeline:
+
+```text
+Commit
+  ↓
+Lint
+  ↓
+Unit Tests
+  ↓
+Security Scan
+  ↓
+Build
+  ↓
+Integration Tests
+  ↓
+Container Scan
+  ↓
+Deploy Dev
+  ↓
+Smoke Tests
+  ↓
+Approval
+  ↓
+Deploy Staging
+  ↓
+E2E
+  ↓
+Approval
+  ↓
+Production
+```
+
+---
+
+## 51. Testing Strategy
+
+Required testing layers:
+
+```text
+Unit testing
+
+API testing
+
+Database testing
+
+KPI validation
+
+Data-quality testing
+
+Frontend component testing
+
+E2E workflow testing
+
+Security testing
+
+RBAC testing
+
+AI evaluation
+
+Prediction validation
+
+Load testing
+
+Failover testing
+```
+
+---
+
+## 52. AI Evaluation
+
+Build a permanent evaluation dataset.
+
+Example prompts:
+
+```text
+Which projects are at risk?
+
+What changed this week?
+
+Which transfer has the largest schedule variance?
+
+Why is TCM-1042 delayed?
+
+Show transfers into Kulim below 80% readiness.
+
+Generate management summary.
+```
+
+For every test validate:
+
+```text
+Correct project IDs
+Correct KPI
+Correct date range
+No unauthorized data
+Source traceability
+No invented figures
+```
+
+---
+
+## 53. Development Phases
+
+### Phase 0 — Foundation
+
+Build:
+
+```text
+Repository
+Design system
+Frontend shell
+Backend skeleton
+Database schema
+Seed data
+Docker environment
+CI
+Authentication stub
+```
+
+---
+
+### Phase 1 — Transfer Core
+
+Build:
+
+```text
+Portfolio
+Project CRUD
+Transfer lifecycle
+Milestones
+Actions
+Risks
+Issues
+Dependencies
+Sites
+History
+```
+
+This creates the operational platform.
+
+---
+
+### Phase 2 — Reporting & Analytics
+
+Build:
+
+```text
+KPI semantic layer
+Executive dashboard
+Portfolio analytics
+Site analytics
+Transfer performance
+Tableau integration
+Exports
+```
+
+---
+
+### Phase 3 — Readiness & Data Quality
+
+Build:
+
+```text
+Readiness model
+Readiness score
+Readiness drill-down
+Data-quality rules
+Freshness
+Quality dashboard
+```
+
+---
+
+### Phase 4 — AI Foundation
+
+Build:
+
+```text
+AI gateway
+Prompt framework
+Copilot
+Context builder
+Audit
+Role-aware retrieval
+AI response citations
+```
+
+---
+
+### Phase 5 — Advanced AI
+
+Build:
+
+```text
+Risk scoring
+Prediction model
+Explain capability
+Historical similarity
+RAG
+Lessons learned
+Recommendations
+```
+
+---
+
+### Phase 6 — Reporting Automation
+
+Build:
+
+```text
+Weekly management report
+Narrative summaries
+PDF export
+PowerPoint export
+Scheduled reports
+```
+
+---
+
+### Phase 7 — Operational Sustaining
+
+Build:
+
+```text
+Platform health
+Airflow monitoring
+Tableau refresh monitoring
+Oracle connectivity
+Error dashboard
+SLA metrics
+AI monitoring
+```
+
+---
+
+### Phase 8 — Enterprise Hardening
+
+Build:
+
+```text
+SSO
+Full RBAC
+Secrets management
+Audit
+HA
+Kubernetes
+Terraform
+Security scanning
+Backup/recovery
+Disaster recovery
+Performance testing
+```
+
+---
+
+## 54. MVP Versus Full Enterprise Version
+
+### MVP
+
+```text
+Next.js
+FastAPI
+PostgreSQL simulation
+Seed transfer data
+Executive dashboard
+Transfer cockpit
+Milestones
+Readiness
+Risks
+AI Copilot
+Risk scoring
+Data quality
+Platform health simulation
+Tableau-style analytics
+```
+
+### Production Target
+
+```text
+Oracle
+Enterprise SSO
+Tableau integration
+Airflow
+Kubernetes
 RBAC
-first migrated dashboard
+Real monitoring
+Real data pipelines
+Governed AI
+ML prediction
+Knowledge layer
+Audit
+Enterprise CI/CD
+Terraform
 ```
 
-### 6–12 months
-
-```text
-metric standardization
-portfolio marts
-dashboard migration
-dual-run validation
-observability
-```
-
-### 12–18 months
-
-```text
-semantic metadata
-read-only AI pilot
-agent evaluation
-portal integration
-```
-
-### 18–24 months
-
-```text
-broader AI adoption
-advanced forecasting
-agent governance
-continuous improvement
-```
+This distinction is essential: the original design correctly says to simplify the prototype aggressively rather than spend the demonstration on infrastructure complexity.
 
 ---
 
-## 39. Final Master Principle
+## 55. Recommended Demo Data
+
+Use believable but clearly synthetic transfer data.
+
+Create approximately:
 
 ```text
-Historically grown reporting logic
-              ↓
-Clean historical data foundation
-              ↓
-One governed metric system
-              ↓
-Consistent BI
-              ↓
-Safe self-explaining analytics
+150 transfers
+10–15 sites
+5 transfer types
+8 lifecycle phases
+1,000+ milestones
+300 risks
+400 actions
+200 dependencies
+12 months KPI history
+100 lessons learned
 ```
 
-> **Transfer & Conversion Intelligence Platform is a governed transfer-performance analytics platform where project history is preserved, KPIs are defined once, dashboards consume trusted metrics, and a secure AI assistant helps users navigate and understand the reporting system.**
+Include:
+
+```text
+Frontend
+Backend
+Si
+SiC
+GaN
+150 mm
+200 mm
+300 mm
+Product transfer
+Technology transfer
+Conversion
+Ramp-up
+Qualification
+```
+
+Do **not** claim synthetic demo data is real Infineon internal data.
+
+---
+
+## 56. Demo Story
+
+The demo should tell one coherent story.
+
+### Step 1 — Executive sees a problem
+
+```text
+Milestone adherence fell
+91% → 84%
+```
+
+### Step 2 — AI explains
+
+```text
+Qualification delays are responsible
+for 43% of deterioration.
+```
+
+### Step 3 — Portfolio identifies project
+
+```text
+TCM-1042
+Villach → Kulim
+HIGH RISK
+```
+
+### Step 4 — Open project cockpit
+
+```text
+Readiness 78%
+Qualification 61%
+Equipment 67%
+```
+
+### Step 5 — Prediction
+
+```text
+78% probability of missing baseline
+Expected delay +11 days
+```
+
+### Step 6 — Historical intelligence
+
+```text
+3 similar projects found
+Median impact +12 days
+```
+
+### Step 7 — Recommendation
+
+```text
+Prioritize equipment readiness
+and qualification capacity.
+```
+
+### Step 8 — Management report
+
+```text
+Generate weekly executive brief
+```
+
+### Step 9 — Operations
+
+Show:
+
+```text
+Oracle healthy
+Pipelines healthy
+Tableau refreshed
+Data quality 98.1%
+```
+
+That single journey demonstrates the entire job description.
+
+---
+
+## 57. What the Platform Demonstrates Against the Role
+
+| Role requirement           | Platform evidence                 |
+| -------------------------- | --------------------------------- |
+| Project tracking           | Transfer Portfolio + Cockpit      |
+| Reporting                  | Executive Command Center          |
+| Oracle/BI development      | Data + reporting architecture     |
+| Web-based tools            | Full Next.js platform             |
+| Tableau dashboards         | Dedicated Tableau analytics layer |
+| Business insights          | KPI + root-cause analytics        |
+| Continuous improvement     | Performance + lessons learned     |
+| Operational sustaining     | Platform Health + Data Quality    |
+| Data engineering           | ETL + semantic layer + quality    |
+| Future-focused development | AI intelligence and prediction    |
+
+---
+
+## 58. Priority Ranking
+
+### Must-have
+
+1. Executive Command Center
+2. Transfer Portfolio
+3. Project Cockpit
+4. Lifecycle + Milestones
+5. Transfer Readiness
+6. Risk & Issues
+7. Transfer Performance
+8. Tableau Analytics
+9. AI Copilot
+10. Data Quality
+11. Platform Health
+
+### High-value differentiation
+
+1. Predictive Risk
+2. Explain "Why?"
+3. Similar Transfers
+4. Lessons Learned
+5. AI Recommendations
+6. Transfer Network
+7. Automated Management Reports
+
+### Infrastructure maturity
+
+1. SSO
+2. RBAC
+3. Airflow
+4. Oracle
+5. Monitoring
+6. Kubernetes
+7. Terraform
+8. CI/CD
+9. Audit
+10. Secrets management
+
+---
+
+## 59. Features Not to Lead With
+
+Do not open the demonstration by saying:
+
+```text
+We use Kubernetes.
+We use vector databases.
+We use LangChain.
+We use Terraform.
+We use microservices.
+```
+
+Those are implementation details.
+
+Instead say:
+
+```text
+We detect transfer risk early.
+We explain why milestones are slipping.
+We compare similar historical transfers.
+We give management actionable recommendations.
+We preserve trusted Oracle data and Tableau analytics.
+We monitor data and platform health.
+```
+
+Then show the architecture underneath.
+
+---
+
+## 60. Final Product Architecture Statement
+
+The final platform should be positioned as:
+
+> **Transfer Intelligence is a modern AI-assisted Transfer & Conversion Operations platform that unifies project tracking, semiconductor-specific transfer lifecycle management, readiness assessment, Tableau analytics, predictive risk intelligence, cross-site reporting, historical knowledge, management-report automation, data-quality governance and operational platform sustaining around a governed Oracle data foundation.**
+
+This directly follows the company-specific conclusion in the uploaded research: the platform should be centered on **manufacturing-network transformation, transfer execution, data integrity and sustainable digital operations**, rather than being a generic AI dashboard.
+
+Infineon's current direction makes that framing credible: its Digital Manufacturing organization emphasizes process stability, data integrity, factory digitalization and operational service levels; its manufacturing footprint is actively being optimized; and One Virtual Fab is being used to accelerate cross-site qualification and ramp-up.
+
+## Final North Star
+
+```text
+                    TRANSFER INTELLIGENCE
+
+                           DATA
+                            │
+                            ▼
+                       VISIBILITY
+                            │
+                            ▼
+                       RELIABILITY
+                            │
+                            ▼
+                       EARLY WARNING
+                            │
+                            ▼
+                        EXPLANATION
+                            │
+                            ▼
+                        PREDICTION
+                            │
+                            ▼
+                      RECOMMENDATION
+                            │
+                            ▼
+                    MANAGEMENT ACTION
+                            │
+                            ▼
+                CONTINUOUS IMPROVEMENT
+```
+
+That should be the master design principle for the entire platform.

@@ -56,7 +56,7 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
 
   return (
     <section
-      className="no-print flex flex-wrap items-end gap-3 border-b border-border bg-surface px-5 py-3"
+      className="no-print flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface p-3"
       aria-label="Portfolio filters"
     >
       {DIMENSIONS.map((dimension) => {

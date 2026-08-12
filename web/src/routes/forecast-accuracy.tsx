@@ -35,7 +35,7 @@ export function ForecastAccuracyScreen() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Forecast accuracy"
+        title="Forecast vs Actual"
         description="Forecast error bucketed by how far before completion the forecast was made — not by how good the last forecast turned out to be."
       />
 

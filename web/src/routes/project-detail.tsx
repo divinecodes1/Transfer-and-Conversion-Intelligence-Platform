@@ -13,7 +13,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Check, Circle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -28,7 +28,14 @@ import {
 import { RiskBadge, useRiskScores } from "@/components/ai";
 import { TrendChart } from "@/components/charts";
 import { HealthBadge, KpiTile, PageHeader, Panel, QueryState } from "@/components/panels";
-import { fmtDate, fmtDays, fmtNumber, projectDetailQuery } from "@/lib/marts";
+import { cn } from "@/lib/utils";
+import {
+  fmtDate,
+  fmtDays,
+  fmtNumber,
+  projectDetailQuery,
+  type ProjectDetail,
+} from "@/lib/marts";
 
 /** Band -> tile colour. The band itself is decided in SQL; this only paints it. */
 const HEALTH_TONE = {
@@ -42,6 +49,72 @@ function days(from: string | null | undefined, to: string | null | undefined) {
   if (!from || !to) return null;
   return Math.round(
     (new Date(to).getTime() - new Date(from).getTime()) / (1000 * 60 * 60 * 24),
+  );
+}
+
+function LifecycleTimeline({ milestones }: { milestones: ProjectDetail["milestones"] }) {
+  if (milestones.length === 0) return null;
+  const currentIndex = milestones.findIndex((milestone) => milestone.event_status !== "REACHED");
+
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-[15px] font-semibold">Transfer lifecycle</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Governed milestone progression with planned and actual dates.
+            </p>
+          </div>
+        </div>
+        <div className="overflow-x-auto pb-2">
+          <ol className="flex min-w-max" aria-label="Transfer lifecycle milestones">
+            {milestones.map((milestone, index) => {
+              const complete = milestone.event_status === "REACHED";
+              const current = index === currentIndex;
+              return (
+                <li key={milestone.milestone_code} className="relative w-40 pr-4">
+                  {index < milestones.length - 1 ? (
+                    <span
+                      className={cn(
+                        "absolute left-7 right-0 top-3 h-px",
+                        complete ? "bg-primary" : "bg-border",
+                      )}
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                  <span
+                    className={cn(
+                      "relative z-10 grid size-6 place-items-center rounded-full border bg-surface",
+                      complete
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : current
+                          ? "border-warn text-warn"
+                          : "border-border text-muted-foreground",
+                    )}
+                  >
+                    {complete ? <Check className="size-3.5" /> : <Circle className="size-2.5 fill-current" />}
+                  </span>
+                  <div className={cn("mt-2 text-xs font-medium", current ? "text-warn" : "text-foreground")}>
+                    {milestone.milestone_name}
+                  </div>
+                  <div className="num mt-1 text-[10px] text-muted-foreground">
+                    Plan {fmtDate(milestone.planned_date)}
+                  </div>
+                  {complete ? (
+                    <div className="num text-[10px] text-ok">Actual {fmtDate(milestone.actual_date)}</div>
+                  ) : current ? (
+                    <div className="text-[10px] font-medium uppercase tracking-wide text-warn">Current</div>
+                  ) : (
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Upcoming</div>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -102,6 +175,8 @@ export function ProjectDetailScreen({ projectId }: { projectId: string }) {
                 </span>
               ) : null}
             </div>
+
+            <LifecycleTimeline milestones={query.data?.milestones ?? []} />
 
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
               <KpiTile

@@ -24,7 +24,7 @@ import { AiAssistant } from "@/components/ai";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { FilterBar } from "@/components/FilterBar";
-import { DemoDataBanner, TopNav } from "@/components/shell";
+import { DemoDataBanner, WorkspaceShell } from "@/components/shell";
 import {
   ConnectionProvider,
   FilterProvider,
@@ -64,20 +64,19 @@ function Shell() {
         <AuthorisationBoundary>
           <ConnectionProvider>
             <FilterProvider>
-              <div className="min-h-screen bg-background">
-                <TopNav />
+              <WorkspaceShell>
+                {showWorkspaceScope ? <DemoDataBanner /> : null}
                 {showWorkspaceScope ? (
-                  <>
-                    <DemoDataBanner />
+                  <div className="mx-auto max-w-[1600px] px-6 pt-4">
                     <FilterBar />
-                  </>
+                  </div>
                 ) : null}
-                <main className="w-full p-5">
+                <main className="mx-auto w-full max-w-[1600px] p-6">
                   <Outlet />
                 </main>
                 <AiAssistant />
                 <Toaster position="bottom-left" />
-              </div>
+              </WorkspaceShell>
             </FilterProvider>
           </ConnectionProvider>
         </AuthorisationBoundary>

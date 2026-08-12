@@ -47,9 +47,81 @@ MILESTONES = [
 
 TODAY = dt.date(2026, 8, 11)   # "as of" date used for active projects
 
+# ---- Readiness ------------------------------------------------------------
+# The seven dimensions and their weights. These are written to
+# dim_readiness_dimension and the calculation layer reads them from there --
+# this list is the seed, not the rule.
+#
+# Note on the master plan: §13 lists these weights AND an example scoring
+# (product 100, process 91, equipment 67, material 86, qualification 61,
+# target site 73, documentation 96) that it labels "78%". Those inputs against
+# these weights give 77.15%, not 78%. The weights are implemented as the plan
+# states them and the score is whatever they produce; the golden vector below
+# preserves the plan's example so the arithmetic is inspectable rather than
+# quietly adjusted to match the prose.
+READINESS_DIMENSIONS = [
+    ("QUALIFICATION", "Qualification Readiness", 25, 1),
+    ("EQUIPMENT",     "Equipment Readiness",     20, 2),
+    ("PROCESS",       "Process Readiness",       15, 3),
+    ("TARGET_SITE",   "Target Site Readiness",   15, 4),
+    ("PRODUCT",       "Product Readiness",       10, 5),
+    ("DOCUMENTATION", "Documentation Readiness", 10, 6),
+    ("MATERIAL",      "Material Readiness",       5, 7),
+]
+
+# How strongly each dimension responds to a project that is running long.
+# Qualification and equipment carry most of the signal, which is what makes the
+# root-cause reading ("qualification is the bottleneck") fall out of the data
+# rather than being asserted over it.
+READINESS_SENSITIVITY = {
+    "QUALIFICATION": 1.00, "EQUIPMENT": 0.85, "TARGET_SITE": 0.55,
+    "PROCESS": 0.50, "MATERIAL": 0.35, "PRODUCT": 0.25, "DOCUMENTATION": 0.20,
+}
+
+# The master plan's §13 worked example, preserved exactly.
+GOLDEN_READINESS = {
+    "PRODUCT": 100, "PROCESS": 91, "EQUIPMENT": 67, "MATERIAL": 86,
+    "QUALIFICATION": 61, "TARGET_SITE": 73, "DOCUMENTATION": 96,
+}
+
 
 def d(base: dt.date, days: float) -> dt.date:
     return base + dt.timedelta(days=round(days))
+
+
+# The gaps between the cumulative MILESTONES fractions, i.e. how much of a
+# transfer each stage consumes in the nominal plan.
+STAGE_GAPS = [0.12, 0.18, 0.22, 0.18, 0.16, 0.14]
+
+
+def stage_fracs(pk: int):
+    """
+    Per-project cumulative milestone fractions.
+
+    Every project used to place its milestones at exactly the same fractions, and
+    the consequence only became visible once the lane view asked which stage costs
+    a route the most time: TAPEOUT -> QUAL_LOTS is the widest nominal gap, so it
+    was the answer for every lane, every time. A "bottleneck" column that reads
+    the same value in all forty rows is the REPLAN_RATE-at-100% failure again -- a
+    constant wearing a chart's clothes, and one that hides the metric's own bugs
+    behind it.
+
+    Giving each project its own stage weights makes the bottleneck a finding.
+    Seeded off the project key from a private stream, so it is deterministic and
+    the main generator's draws are untouched.
+    """
+    if pk == 17:
+        # The golden project keeps the documented geometry exactly.
+        return [frac for _c, _n, _s, frac in MILESTONES]
+    rng = random.Random(9000 + pk)
+    weights = [max(0.04, gap * rng.uniform(0.45, 1.9)) for gap in STAGE_GAPS]
+    total = sum(weights)
+    out, acc = [], 0.0
+    for w in weights:
+        acc += w / total
+        out.append(round(acc, 4))
+    out[-1] = 1.0          # the last milestone is completion, by definition
+    return out
 
 
 def slip_factor(complexity: str) -> float:
@@ -106,6 +178,7 @@ def make_project(i: int):
         # carried internally for building history:
         "_start": start, "_baseline_finish": baseline_finish,
         "_projected_finish": projected_finish, "_base_dur": base_dur,
+        "_slip": slip,
     }
 
 
@@ -195,6 +268,60 @@ def build_history(proj):
     return revisions, snapshots, events
 
 
+def build_readiness(projects, rng):
+    """
+    One readiness row per in-flight project per dimension.
+
+    Population is deliberate: readiness answers "how prepared is this transfer to
+    execute?", which is a question about work still ahead. A COMPLETED project has
+    an outcome, not a readiness, and scoring one would put a 100% row into every
+    portfolio average and drag the number toward "fine" exactly as the active work
+    got harder. CANCELLED is excluded for the same reason every other metric
+    excludes it.
+
+    Scores are driven by the project's own slip factor rather than drawn freely,
+    so readiness and schedule outcome are correlated the way they are in reality
+    -- otherwise the readiness screen is a random-number generator that happens to
+    render as a bar chart, and every insight built on it is an artefact.
+
+    `rng` is a private stream. The existing generator's draws are untouched, so
+    dim_project and every history table stay byte-identical and the golden gate
+    keeps asserting the same numbers it always did.
+    """
+    rows = []
+    golden_key = None
+    for p in sorted(projects, key=lambda x: x["project_key"]):
+        if p["status"] not in ("ACTIVE", "PLANNED"):
+            continue
+        # Work already banked. A project that has not started is less ready than
+        # one halfway through, independently of how well it is going.
+        maturity = 1.0 if p["status"] == "ACTIVE" else 0.55
+        # How badly it is running long, 0 (on plan) .. 1 (heavy overrun).
+        pressure = min(1.0, max(0.0, p["_slip"] - 1.0))
+
+        if golden_key is None and p["status"] == "ACTIVE":
+            golden_key = p["project_key"]
+            scores = dict(GOLDEN_READINESS)
+        else:
+            scores = {}
+            for code, _name, _w, _seq in READINESS_DIMENSIONS:
+                drop = pressure * READINESS_SENSITIVITY[code] * 90.0
+                raw = 100.0 - drop - (1.0 - maturity) * 30.0 + rng.gauss(0, 6)
+                scores[code] = int(round(min(100.0, max(0.0, raw))))
+
+        for code, _name, _w, _seq in READINESS_DIMENSIONS:
+            # Most assessments are current; a tail is stale, which is what makes
+            # "when was this last looked at?" a question worth putting on screen.
+            age = rng.randint(0, 21) if rng.random() < 0.85 else rng.randint(22, 120)
+            rows.append({
+                "project_key": p["project_key"],
+                "dimension_code": code,
+                "assessed_on": TODAY - dt.timedelta(days=age),
+                "score_pct": scores[code],
+            })
+    return rows, golden_key
+
+
 def inject_golden(projects):
     """Force project index 17 to the doc's exact golden values (T-017)."""
     for p in projects:
@@ -276,12 +403,31 @@ def main():
     write_csv("dim_fiscal_date.csv", fiscal,
               ["calendar_date","fiscal_week","fiscal_month","fiscal_quarter","fiscal_year"])
 
+    # Readiness draws from its own stream, after every table above is settled, so
+    # adding it cannot move a single existing number.
+    readiness, golden_readiness_key = build_readiness(projects, random.Random(SEED))
+    write_csv("dim_readiness_dimension.csv",
+              [{"dimension_code": c, "dimension_name": n, "weight_pct": w, "sequence_no": s}
+               for c, n, w, s in READINESS_DIMENSIONS],
+              ["dimension_code","dimension_name","weight_pct","sequence_no"])
+    write_csv("fact_readiness_assessment.csv", readiness,
+              ["project_key","dimension_code","assessed_on","score_pct"])
+
     print(f"Generated {len(projects)} projects, {len(revisions)} schedule revisions, "
           f"{len(snapshots)} snapshots, {len(events)} milestone events, {len(fiscal)} fiscal dates.")
+    print(f"Readiness: {len(readiness)} assessments across "
+          f"{len(READINESS_DIMENSIONS)} dimensions "
+          f"(weights sum to {sum(w for _c, _n, w, _s in READINESS_DIMENSIONS)}).")
     if golden:
         print(f"Golden project injected: {golden['project_id']} "
               f"(start {golden['actual_start']}, baseline {golden['_baseline_finish']}, "
               f"latest {golden['_force_latest_finish']}, actual {golden['actual_finish']}).")
+    if golden_readiness_key:
+        gid = next(p["project_id"] for p in projects
+                   if p["project_key"] == golden_readiness_key)
+        weighted = sum(GOLDEN_READINESS[c] * w for c, _n, w, _s in READINESS_DIMENSIONS) / 100.0
+        print(f"Golden readiness injected: {gid} "
+              f"(master plan §13 example -> {weighted:.2f}% overall).")
 
 
 if __name__ == "__main__":

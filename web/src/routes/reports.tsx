@@ -49,8 +49,8 @@ export function ReportsScreen() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Reports"
-        description="A print-ready summary of the current scope, with the definitions and data vintage attached."
+        title="Management Reports"
+        description="Create a decision-ready portfolio summary with governed KPIs, narrative context, attention items and an auditable data vintage."
       >
         <Button variant="outline" size="sm" onClick={() => window.print()}>
           <Printer />

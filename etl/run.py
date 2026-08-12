@@ -24,14 +24,19 @@ CORE_TABLES = {
     "dim_project": "tr_core.dim_project",
     "dim_milestone": "tr_core.dim_milestone",
     "dim_fiscal_date": "tr_core.dim_fiscal_date",
+    "dim_readiness_dimension": "tr_core.dim_readiness_dimension",
     "fact_schedule_revision": "tr_core.fact_schedule_revision",
     "fact_project_snapshot": "tr_core.fact_project_snapshot",
     "fact_milestone_event": "tr_core.fact_milestone_event",
+    "fact_readiness_assessment": "tr_core.fact_readiness_assessment",
 }
 
 # statements that must run before data load (schemas + core tables) vs after.
 PRELOAD = ["00_schemas.sql", "01_core_tables.sql", "02_governance.sql"]
-POSTLOAD = ["03_metric_views.sql", "04_marts.sql", "09_entitlements.sql"]
+# 13 must follow 03/04: readiness reads the register for the health band, and the
+# network and similarity views read readiness.
+POSTLOAD = ["03_metric_views.sql", "04_marts.sql", "13_readiness_network.sql",
+            "09_entitlements.sql"]
 # Row-level security is PostgreSQL-only; DuckDB is the dev/test engine and has no
 # equivalent, so the entitlement *model* is portable and its *enforcement* is not.
 POSTLOAD_PG = ["07_indexes.sql", "10_rls.sql", "11_observability.sql", "12_ai.sql"]

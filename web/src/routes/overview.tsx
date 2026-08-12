@@ -11,8 +11,9 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ArrowUpRight } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CheckCircle2, Eye, Telescope } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -33,6 +34,7 @@ import {
   kpisQuery,
   projectsQuery,
   trendQuery,
+  type DistributionRow,
 } from "@/lib/marts";
 
 export function OverviewScreen() {
@@ -46,18 +48,79 @@ export function OverviewScreen() {
   const risk = useRiskScores();
 
   const k = kpis.data?.kpis;
+  const slowestCohort = (distribution.data?.series ?? []).reduce<DistributionRow | null>(
+    (current, row) => {
+      if (row.p50 == null) return current;
+      if (!current || current.p50 == null || row.p50 > current.p50) return row;
+      return current;
+    },
+    null,
+  );
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <PageHeader
-        title="Transfer-project portfolio performance"
-        description="One decision-ready view of delivery health, risk and throughput. Every figure comes from the governed metric layer."
+        title="Transfer & Conversion Command Center"
+        description="Portfolio performance, operational risk and management priorities across the governed transfer landscape."
       />
+
+      <Card className="overflow-hidden border-primary/20">
+        <CardContent className="grid p-0 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            {
+              label: "What",
+              icon: Eye,
+              value: `${fmtNumber(k?.delayed_count)} projects require attention`,
+              detail: `${fmtNumber(k?.total_projects)} projects in the current scope`,
+            },
+            {
+              label: "Why",
+              icon: AlertTriangle,
+              value: slowestCohort
+                ? `${slowestCohort.cohort} has the longest median cycle`
+                : "Cohort analysis is loading",
+              detail: slowestCohort
+                ? `${fmtNumber(slowestCohort.p50)} days median`
+                : "Governed metric analysis",
+            },
+            {
+              label: "Next",
+              icon: Telescope,
+              value: `${fmtNumber(k?.wip)} active transfers remain in progress`,
+              detail: `Median WIP age ${fmtNumber(k?.median_wip_age)} days`,
+            },
+            {
+              label: "Action",
+              icon: CheckCircle2,
+              value: "Review the management attention list",
+              detail: "Prioritise high drift and repeated replanning",
+            },
+          ].map((item, index) => {
+            const Icon = item.icon;
+            return (
+              <div
+                key={item.label}
+                className={
+                  index === 0
+                    ? "p-4"
+                    : "border-t border-border p-4 sm:border-l sm:border-t-0"
+                }
+              >
+                <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-primary">
+                  <Icon className="size-3.5" /> {item.label}
+                </div>
+                <div className="mt-2 text-sm font-semibold">{item.value}</div>
+                <div className="mt-1 text-xs text-muted-foreground">{item.detail}</div>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
 
       <AiInsightCard
         kind="portfolio_overview"
-        title="AI portfolio briefing"
-        description="What changed, where the risk is concentrated and what to do next—using the current filter scope."
+        title="AI management brief"
+        description="What changed, where risk is concentrated and what management should do next—using the current governed scope."
         filters={filters}
       />
 
@@ -114,7 +177,7 @@ export function OverviewScreen() {
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="order-2 grid gap-4 lg:grid-cols-2">
         <Panel
           title="Throughput and delivery quality by fiscal year"
           description="Completed projects, on-time delivery and replanning over time."
@@ -207,8 +270,9 @@ export function OverviewScreen() {
       </div>
 
       <Panel
-        title="Watchlist — ageing and overrunning projects"
-        description="Projects requiring attention because their plan has moved furthest from the frozen commitment."
+        className="order-1"
+        title="Management attention"
+        description="Transfers requiring review because schedule movement, age or repeated replanning has crossed the current priority threshold."
         envelope={worst.data}
         actions={
           <Button asChild variant="outline" size="sm">
