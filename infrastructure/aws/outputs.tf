@@ -17,12 +17,12 @@ output "console_url" {
 
 output "api_url" {
   description = "HTTPS ingress for the analytics API. Swagger at /docs."
-  value       = "https://${aws_cloudfront_distribution.api.domain_name}"
+  value       = aws_apigatewayv2_stage.api.invoke_url
 }
 
 output "assistant_url" {
   description = "HTTPS ingress for the reporting assistant."
-  value       = "https://${aws_cloudfront_distribution.assistant.domain_name}"
+  value       = aws_apigatewayv2_stage.assistant.invoke_url
 }
 
 output "keycloak_url" {

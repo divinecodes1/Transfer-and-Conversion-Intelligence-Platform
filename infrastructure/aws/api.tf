@@ -162,10 +162,10 @@ resource "aws_lambda_function" "assistant" {
       APP_ENV                      = var.environment
       AWS_LWA_PORT                 = "8100"
       AWS_LWA_READINESS_CHECK_PATH = "/healthz"
-      # Through the distribution, not the Function URL. The URL now requires
-      # AWS_IAM, and the assistant calls the API with the caller's Keycloak
-      # token rather than a signed AWS request -- CloudFront is what signs.
-      TRANSFEROPS_API              = "https://${aws_cloudfront_distribution.api.domain_name}"
+      # Through the gateway, like every other caller. The assistant forwards the
+      # end user's Keycloak token, so it must reach the API by the same governed
+      # path a browser does rather than by a privileged side door.
+      TRANSFEROPS_API              = aws_apigatewayv2_stage.api.invoke_url
       TRANSFEROPS_WEB_ORIGIN       = "https://${aws_cloudfront_distribution.console.domain_name}"
       TRANSFEROPS_AI_PROVIDER      = var.ai_provider
       TRANSFEROPS_AI_DAILY_CAP     = tostring(var.ai_daily_request_cap)
@@ -179,38 +179,15 @@ resource "aws_lambda_function" "assistant" {
   lifecycle { ignore_changes = [image_uri] }
 }
 
-resource "aws_lambda_function_url" "assistant" {
-  function_name      = aws_lambda_function.assistant.function_name
-  authorization_type = "AWS_IAM"
-  cors {
-    allow_origins = ["https://${aws_cloudfront_distribution.console.domain_name}"]
-    allow_methods = ["GET", "POST"]
-    allow_headers = ["authorization", "content-type", "x-request-id"]
-    max_age       = 3600
-  }
-}
-
-# Reached only through CloudFront (api_ingress.tf), which signs every request
-# with SigV4 via an Origin Access Control. The browser therefore needs no AWS
-# credential of its own -- the objection that used to make AWS_IAM impractical
-# here -- and the function URL is not invocable by anyone but that distribution.
+# Neither function has a Function URL. Both are fronted by an API Gateway HTTP
+# API instead (api_ingress.tf), which carries the CORS configuration that used
+# to live here. See that file for why: this account refuses
+# `lambda:InvokeFunctionUrl` for every caller, signed or not.
 #
-# The platform's own authentication is still the boundary that matters: a
+# The platform's own authentication remains the boundary that matters -- a
 # verified Keycloak token checked in api/auth.py, with entitlements enforced by
-# row-level security. IAM in front of it governs *who may reach the endpoint*,
-# not who may see which rows.
-resource "aws_lambda_function_url" "api" {
-  function_name      = aws_lambda_function.api.function_name
-  authorization_type = "AWS_IAM"
-
-  cors {
-    allow_origins  = ["https://${aws_cloudfront_distribution.console.domain_name}"]
-    allow_methods  = ["GET", "POST"]
-    allow_headers  = ["authorization", "content-type", "x-request-id", "x-demo-user"]
-    expose_headers = ["x-request-id"]
-    max_age        = 3600
-  }
-}
+# row-level security. The ingress governs who may reach the endpoint, never who
+# may see which rows.
 
 # ---- The nightly pipeline ---------------------------------------------------
 # Same image, different command. A Container Apps Job on Azure; here a Lambda on
