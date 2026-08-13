@@ -10,6 +10,7 @@ variable "location" { type = string }
 variable "tags" { type = map(string) }
 variable "budget_amount" { type = number }
 variable "budget_contact_emails" { type = list(string) }
+variable "budget_time_grain" { type = string }
 
 resource "azurerm_resource_group" "this" {
   name     = var.name
@@ -25,18 +26,27 @@ resource "azurerm_consumption_budget_resource_group" "this" {
   name              = "budget-${var.name}"
   resource_group_id = azurerm_resource_group.this.id
 
-  amount     = var.budget_amount
-  time_grain = "Monthly"
+  amount = var.budget_amount
+
+  # Monthly resets on the 1st and alarms on a bad month. Annually does not reset,
+  # so it alarms on cumulative spend -- which is the one that matches how a
+  # student credit actually runs out: twelve quiet months at 8 USD never trips a
+  # monthly threshold and still empties a 100 USD credit.
+  time_grain = var.budget_time_grain
 
   time_period {
-    # Budgets must start on the first of a month, and Azure rejects a start date
-    # in the past on creation.
-    start_date = formatdate("YYYY-MM-01'T'00:00:00'Z'", timeadd(timestamp(), "720h"))
+    # The first of the CURRENT month, so the budget tracks spend from the moment
+    # it is created. Azure requires a first-of-month start date.
+    #
+    # This previously added 720 hours to "now", which pushed the start into next
+    # month -- the budget existed, showed green, and measured nothing during the
+    # first month. That is precisely the month when a misconfigured resource is
+    # most likely to be running, so the alert was absent exactly when it mattered.
+    start_date = formatdate("YYYY-MM-01'T'00:00:00'Z'", timestamp())
   }
 
-  # Four thresholds, three of them forecast-free actuals, because by the time
-  # 100% is *actual* the money is already spent. 50 and 75 are the ones that
-  # leave time to turn something off.
+  # Four actual thresholds. 50 and 75 are the ones that leave time to turn
+  # something off; by the time 100% is *actual*, the money is already spent.
   dynamic "notification" {
     for_each = [50, 75, 90, 100]
     content {

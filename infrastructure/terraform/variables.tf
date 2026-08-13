@@ -51,16 +51,49 @@ variable "owner" {
 
 variable "monthly_budget_amount" {
   description = <<-EOT
-    Monthly budget in the subscription's billing currency. This does NOT cap
-    spend -- Azure has no hard stop on a credit subscription. It raises alerts,
-    and the alerts are the only early warning before the credit is gone.
+    Budget in the subscription's billing currency, for the period set by
+    budget_time_grain.
+
+    This does NOT cap spend -- Azure has no hard stop on a credit subscription.
+    It raises alerts, and the alerts are the only early warning before the
+    credit is gone.
+
+    Thresholds fire at 50/75/90/100% of this amount, so a value of 30 means
+    warnings at 15, 22.50, 27 and 30. The earlier ones are the useful ones: by
+    the time the 100% alert lands, the money is already spent.
   EOT
   type        = number
-  default     = 10
+  default     = 30
+}
+
+variable "budget_time_grain" {
+  description = <<-EOT
+    Budget period: Monthly | Quarterly | Annually.
+
+    Monthly resets on the 1st and alarms on a bad month -- a runaway resource,
+    a replica left warm. It is the operational alarm and the default.
+
+    Annually does not reset, so it alarms on CUMULATIVE spend. That is the one
+    that matches how a student credit actually runs out: twelve quiet months at
+    8 USD never trip a monthly threshold and still empty a 100 USD credit.
+
+    Set "Annually" with monthly_budget_amount = 30 to be told when total spend
+    passes 30 USD rather than when one month does.
+  EOT
+  type        = string
+  default     = "Monthly"
+
+  validation {
+    condition     = contains(["Monthly", "Quarterly", "Annually"], var.budget_time_grain)
+    error_message = "budget_time_grain must be Monthly, Quarterly or Annually."
+  }
 }
 
 variable "budget_alert_emails" {
-  description = "Addresses that receive budget alerts. Empty disables the budget."
+  description = <<-EOT
+    Addresses that receive budget alerts. EMPTY DISABLES THE BUDGET ENTIRELY --
+    an alert with nowhere to go is a row in a portal nobody opens.
+  EOT
   type        = list(string)
   default     = []
 }
@@ -269,11 +302,18 @@ variable "ai_daily_request_cap" {
 
 variable "keycloak_image" {
   description = <<-EOT
-    Keycloak image. Pinned by digest-able tag rather than :latest, so a redeploy
-    cannot silently move the identity provider to a new major version.
+    Keycloak image, built from infrastructure/docker/keycloak/Dockerfile.
+
+    NOT the stock quay.io image. Container Apps cannot bind-mount a single file
+    the way docker-compose does, so the realm and the branded themes are baked
+    into this image instead -- otherwise the container starts with no realm and
+    sign-in is impossible. The image is also pre-built (`kc.sh build`), which is
+    what makes `start --optimized` valid and keeps the cold start short.
+
+    deploy-azure-student.sh builds and pushes it alongside the API image.
   EOT
   type        = string
-  default     = "quay.io/keycloak/keycloak:26.0"
+  default     = "ghcr.io/OWNER/transfer-intelligence-keycloak:latest"
 }
 
 variable "keycloak_admin_username" {
@@ -292,6 +332,42 @@ variable "keycloak_audience" {
   description = "Expected 'aud' claim. Must match the realm's audience mapper."
   type        = string
   default     = "transferops-api"
+}
+
+variable "keycloak_smtp_host" {
+  description = <<-EOT
+    SMTP relay for verification and password-reset mail.
+
+    Empty by default, and the consequence is worth stating plainly: with no
+    relay, Keycloak cannot send a verification message, so SELF-REGISTRATION
+    DOES NOT COMPLETE in Azure. Locally, Mailpit catches the mail and the whole
+    flow works. Point this at an approved relay to restore it; otherwise grant
+    the operator account directly in tr_gov and use that.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "keycloak_smtp_port" {
+  type    = string
+  default = "587"
+}
+
+variable "keycloak_smtp_from" {
+  type    = string
+  default = "no-reply@transferops.local"
+}
+
+variable "keycloak_smtp_user" {
+  type    = string
+  default = ""
+}
+
+variable "keycloak_smtp_password" {
+  description = "Supply via TF_VAR_keycloak_smtp_password."
+  type        = string
+  default     = ""
+  sensitive   = true
 }
 
 variable "keycloak_min_replicas" {

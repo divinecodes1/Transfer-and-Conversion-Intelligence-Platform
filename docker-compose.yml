@@ -29,6 +29,11 @@ services:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
       KC_HEALTH_ENABLED: "true"
+      # Resolved into the realm's redirectUris and webOrigins at import time.
+      # Locally this is the Vite dev server; in Azure the deploy script passes
+      # the Static Web App's URL, so the deployed console needs no manual
+      # redirect-URI entry in the admin console.
+      TRANSFEROPS_WEB_ORIGIN: ${TRANSFEROPS_WEB_ORIGIN:-http://localhost:5173}
       KEYCLOAK_SMTP_HOST: ${KEYCLOAK_SMTP_HOST:-mailpit}
       KEYCLOAK_SMTP_PORT: ${KEYCLOAK_SMTP_PORT:-1025}
       KEYCLOAK_SMTP_FROM: ${KEYCLOAK_SMTP_FROM:-no-reply@transferops.local}

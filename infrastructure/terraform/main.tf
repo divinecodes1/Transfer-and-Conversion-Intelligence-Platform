@@ -69,10 +69,11 @@ resource "random_password" "keycloak_admin" {
 module "resource_group" {
   source = "./modules/resource-group"
 
-  name                = "rg-transfer-intelligence-${var.environment}"
-  location            = var.location
-  tags                = local.tags
-  budget_amount       = var.monthly_budget_amount
+  name                  = "rg-transfer-intelligence-${var.environment}"
+  location              = var.location
+  tags                  = local.tags
+  budget_amount         = var.monthly_budget_amount
+  budget_time_grain     = var.budget_time_grain
   budget_contact_emails = var.budget_alert_emails
 }
 
@@ -229,4 +230,18 @@ module "container_app" {
   keycloak_min_replicas   = var.keycloak_min_replicas
   keycloak_cpu            = var.keycloak_cpu
   keycloak_memory         = var.keycloak_memory
+
+  # Supplied so realm import can resolve the placeholders in the smtpServer
+  # block. Empty host means no mail is sent -- see the note in the module.
+  keycloak_smtp = {
+    KEYCLOAK_SMTP_HOST     = var.keycloak_smtp_host
+    KEYCLOAK_SMTP_PORT     = var.keycloak_smtp_port
+    KEYCLOAK_SMTP_FROM     = var.keycloak_smtp_from
+    KEYCLOAK_SMTP_REPLY_TO = var.keycloak_smtp_from
+    KEYCLOAK_SMTP_USER     = var.keycloak_smtp_user
+    KEYCLOAK_SMTP_PASSWORD = var.keycloak_smtp_password
+    KEYCLOAK_SMTP_AUTH     = var.keycloak_smtp_user == "" ? "false" : "true"
+    KEYCLOAK_SMTP_SSL      = "false"
+    KEYCLOAK_SMTP_STARTTLS = var.keycloak_smtp_host == "" ? "false" : "true"
+  }
 }

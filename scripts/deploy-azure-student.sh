@@ -92,7 +92,31 @@ if [[ -z "${GH_REPO}" ]]; then
 fi
 IMAGE="ghcr.io/$(echo "${GH_REPO}" | tr '[:upper:]' '[:lower:]')"
 export TF_VAR_api_image="${IMAGE}:latest"
-info "Image: ${TF_VAR_api_image}"
+export TF_VAR_keycloak_image="${IMAGE}-keycloak:latest"
+info "API image:      ${TF_VAR_api_image}"
+info "Keycloak image: ${TF_VAR_keycloak_image}"
+
+# The budget is the only early warning before the credit is gone -- Azure cannot
+# hard-stop spend on a credit subscription. Terraform skips the budget entirely
+# when no address is supplied, so ask rather than deploy without one.
+if [[ -z "${TF_VAR_budget_alert_emails:-}" ]]; then
+  if ! grep -qE '^\s*budget_alert_emails\s*=\s*\[\s*"' "${TF_DIR}/terraform.tfvars" 2>/dev/null; then
+    warn "No budget alert address is configured."
+    warn "Without one, NO budget is created and nothing warns you before the credit runs out."
+    read -r -p "  Email for budget alerts (blank to deploy without a budget): " budget_email
+    if [[ -n "${budget_email}" ]]; then
+      export TF_VAR_budget_alert_emails="[\"${budget_email}\"]"
+      info "Alerts at 50/75/90/100% will go to ${budget_email}."
+    else
+      warn "Deploying with no budget. Watch Cost Management manually."
+    fi
+  fi
+fi
+
+# Resolved into the realm's redirect URIs at import time. The Static Web App
+# hostname is not known until after apply, so Terraform wires it internally --
+# this is only for the local compose path and for documentation.
+export TF_VAR_keycloak_smtp_host="${KEYCLOAK_SMTP_HOST:-}"
 
 if [[ -z "${TF_VAR_ai_api_key:-}" ]]; then
   info "No TF_VAR_ai_api_key set -- deploying with AI_PROVIDER=mock."
@@ -107,12 +131,23 @@ if ! docker info >/dev/null 2>&1; then
   die "Docker is not running."
 fi
 
+info "API image"
 docker build -t "${IMAGE}:latest" "${REPO_ROOT}"
+
+# Keycloak with the realm and themes baked in. Container Apps cannot bind-mount
+# the way compose does, so an image without them would start with no realm at
+# all and sign-in would be impossible.
+info "Keycloak image (realm + themes baked in)"
+docker build \
+  -f "${REPO_ROOT}/infrastructure/docker/keycloak/Dockerfile" \
+  -t "${IMAGE}-keycloak:latest" \
+  "${REPO_ROOT}"
 
 if [[ -n "${GITHUB_TOKEN:-}" ]]; then
   info "Pushing to GHCR"
   echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR:-$USER}" --password-stdin
   docker push "${IMAGE}:latest"
+  docker push "${IMAGE}-keycloak:latest"
 else
   warn "GITHUB_TOKEN not set; skipping the push."
   warn "Container Apps pulls from the registry, so the image must exist there."
@@ -169,9 +204,65 @@ for attempt in $(seq 1 24); do
   sleep 10
 done
 
-warn "The realm's redirect URIs must include ${WEB_URL}."
-warn "keycloak/realm-export.json ships with localhost origins only."
-warn "See docs/azure-deployment.md -> 'Pointing the realm at the deployed console'."
+info "Realm imported with ${WEB_URL} already an allowed redirect origin."
+
+# ---- 7b. Grant the operator an entitlement ---------------------------------
+step "Granting the operator access"
+
+# A verified account still holds no entitlement -- that is the platform working
+# as designed, and it is the wall every first deployment hits. Roles and data
+# scope resolve from tr_gov, never from the token, so the grant is a database
+# row and can be made here.
+OPERATOR="${TRANSFEROPS_OPERATOR:-}"
+if [[ -z "${OPERATOR}" && -n "${CLIENT_IP}" ]]; then
+  # The signed-in Azure user is the person running this, and the realm uses
+  # email as the username, so it is the right default.
+  OPERATOR="$(az account show --query user.name -o tsv 2>/dev/null || true)"
+fi
+
+if [[ -n "${OPERATOR}" && -n "${CLIENT_IP}" ]]; then
+  info "Granting PLATFORM_ADMIN over all portfolios to ${OPERATOR}"
+  TRANSFEROPS_OPERATOR="${OPERATOR}" \
+  SEED_DSN="$(terraform -chdir="${TF_DIR}" output -raw loader_dsn)" \
+  "${PYTHON:-python3}" - <<'PY'
+import os
+import psycopg2
+
+username = os.environ["TRANSFEROPS_OPERATOR"]
+with psycopg2.connect(os.environ["SEED_DSN"]) as con, con.cursor() as cur:
+    cur.execute("SELECT set_config('transferops.portfolios', '*', false)")
+    cur.execute(
+        "INSERT INTO tr_gov.app_user (username, display_name, email) "
+        "VALUES (%s, %s, %s) ON CONFLICT (username) DO NOTHING",
+        (username, username, username))
+    cur.execute(
+        "INSERT INTO tr_gov.user_role (username, role_code) "
+        "SELECT %s, 'PLATFORM_ADMIN' WHERE NOT EXISTS ("
+        "  SELECT 1 FROM tr_gov.user_role "
+        "  WHERE username = %s AND role_code = 'PLATFORM_ADMIN')",
+        (username, username))
+    cur.execute(
+        "INSERT INTO tr_gov.data_entitlement "
+        "(username, dimension_type, dimension_value, valid_from, valid_to) "
+        "SELECT %s, 'PORTFOLIO', '*', DATE '2020-01-01', NULL WHERE NOT EXISTS ("
+        "  SELECT 1 FROM tr_gov.data_entitlement "
+        "  WHERE username = %s AND dimension_type = 'PORTFOLIO')",
+        (username, username))
+print(f"  {username} -> PLATFORM_ADMIN, all portfolios")
+PY
+  warn "sql/09_entitlements.sql drops these tables on reload."
+  warn "Add the grant to that file to make it survive a rebuild."
+else
+  warn "No operator granted. Sign-in will reach the 'account is verified' screen."
+  warn "Set TRANSFEROPS_OPERATOR=<your-email> and re-run, or grant manually:"
+  warn "  docs/azure-deployment.md -> 'Grant yourself access'"
+fi
+
+if [[ -z "${KEYCLOAK_SMTP_HOST:-}" ]]; then
+  warn "No SMTP relay configured, so Keycloak cannot send verification mail."
+  warn "Self-registration will not complete in Azure. The operator grant above"
+  warn "is the way in; set keycloak_smtp_host to restore registration."
+fi
 
 # ---- 8. Smoke test ----------------------------------------------------------
 step "Smoke test"

@@ -63,6 +63,7 @@ variable "keycloak_audience" { type = string }
 variable "keycloak_min_replicas" { type = number }
 variable "keycloak_cpu" { type = number }
 variable "keycloak_memory" { type = string }
+variable "keycloak_smtp" { type = map(string) }
 
 locals {
   # DSNs are assembled here and stored whole as secrets. A connection string
@@ -286,6 +287,21 @@ resource "azurerm_container_app" "keycloak" {
   workload_profile_name        = "Consumption"
   tags                         = var.tags
 
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [var.identity_id]
+  }
+
+  dynamic "registry" {
+    for_each = var.registry_server == "" ? [] : [1]
+    content {
+      server               = var.registry_server
+      identity             = var.registry_uses_identity ? var.identity_id : null
+      username             = var.registry_uses_identity ? null : var.registry_username
+      password_secret_name = var.registry_uses_identity ? null : "registry-password"
+    }
+  }
+
   secret {
     name  = "keycloak-admin-password"
     value = var.keycloak_admin_password
@@ -294,6 +310,14 @@ resource "azurerm_container_app" "keycloak" {
   secret {
     name  = "keycloak-db-password"
     value = var.secrets["db-admin-password"]
+  }
+
+  dynamic "secret" {
+    for_each = var.registry_password != "" ? [1] : []
+    content {
+      name  = "registry-password"
+      value = var.registry_password
+    }
   }
 
   ingress {
@@ -369,6 +393,34 @@ resource "azurerm_container_app" "keycloak" {
       env {
         name  = "KC_HEALTH_ENABLED"
         value = "true"
+      }
+
+      # Resolved into the realm's redirectUris and webOrigins during import, so
+      # the deployed console is an allowed origin without anyone opening the
+      # admin console. The realm file in the image carries the placeholder; this
+      # supplies the value.
+      env {
+        name  = "TRANSFEROPS_WEB_ORIGIN"
+        value = "https://${azurerm_static_web_app.web.default_host_name}"
+      }
+
+      # The realm's smtpServer block is written with ${KEYCLOAK_SMTP_*}
+      # placeholders, and realm import fails outright if they do not resolve --
+      # so every one of them is supplied even though the student deployment has
+      # no mail relay.
+      #
+      # The consequence is honest and worth knowing: with no SMTP host, Keycloak
+      # cannot send a verification message, so SELF-REGISTRATION DOES NOT
+      # COMPLETE in Azure. Locally, Mailpit catches the mail and the flow works
+      # end to end. Point these at a real relay to restore it in the cloud;
+      # docs/azure-deployment.md says so, and the operator account is granted
+      # directly in tr_gov instead.
+      dynamic "env" {
+        for_each = var.keycloak_smtp
+        content {
+          name  = env.key
+          value = env.value
+        }
       }
 
       # Keycloak's own health endpoints, on the management port. The startup

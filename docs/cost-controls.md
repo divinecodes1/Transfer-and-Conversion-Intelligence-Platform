@@ -14,12 +14,30 @@ Without `budget_alert_emails`, no budget is created at all — an alert with
 nowhere to go is a row in a portal nobody opens.
 
 ```hcl
-monthly_budget_amount = 10
+monthly_budget_amount = 30
+budget_time_grain     = "Monthly"
 budget_alert_emails   = ["you@university.edu"]
 ```
 
-Alerts fire at 50%, 75%, 90% and 100% of actual, plus one **forecast** alert —
-the only one that arrives before the money is spent.
+Alerts fire at 50%, 75%, 90% and 100% of the amount — so a budget of 30 warns at
+**15, 22.50, 27 and 30** — plus one **forecast** alert, the only one that
+arrives before the money is spent.
+
+**Pick the grain deliberately**, because the two answer different questions:
+
+| Grain | Alarms when | Catches |
+|---|---|---|
+| `Monthly` | one month exceeds the amount | a runaway resource, a replica left warm |
+| `Annually` | *cumulative* spend exceeds it | slow, steady credit burn |
+
+Monthly is the default and the operational alarm. But note the gap it leaves:
+this stack should cost 0–15 USD/month, so twelve quiet months at 8 USD never
+trip a 30 USD monthly threshold and still empty a 100 USD credit. If what you
+want is "tell me when I have used 30 of my 100", set
+`budget_time_grain = "Annually"`.
+
+Nothing stops you running both — Azure allows multiple budgets on a resource
+group.
 
 > Azure cannot hard-stop spend on a credit subscription. The alert is the
 > mechanism, not a cap.

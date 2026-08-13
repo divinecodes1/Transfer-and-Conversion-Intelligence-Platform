@@ -17,7 +17,15 @@ location    = "westeurope"
 owner       = "your-name"
 
 # ---- Budget: set this, it is the only early warning you get -----------------
-monthly_budget_amount = 10
+# Thresholds fire at 50/75/90/100% of the amount, so 30 warns at 15, 22.50, 27
+# and 30, plus a forecast alert before the spend actually happens.
+#
+# Monthly  -- resets on the 1st; alarms on a bad month (a replica left warm).
+# Annually -- does not reset; alarms on CUMULATIVE spend, which is how a student
+#             credit actually runs out: twelve quiet months at 8 USD never trip
+#             a monthly threshold and still empty a 100 USD credit.
+monthly_budget_amount = 30
+budget_time_grain     = "Monthly"
 budget_alert_emails   = ["you@university.edu"]
 
 # ---- Database --------------------------------------------------------------

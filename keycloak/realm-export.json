@@ -55,17 +55,27 @@
       "publicClient": true,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
+      "_comment_origins": [
+        "${TRANSFEROPS_WEB_ORIGIN} is resolved at realm-import time, so the",
+        "deployed console's URL is version-controlled here rather than typed",
+        "into the admin console after every deployment. It defaults to the Vite",
+        "dev server, which is what docker-compose supplies locally.",
+        "Redirect URIs are never wildcarded to a bare host: an open redirect on",
+        "an OIDC client is how an authorization code reaches somebody else."
+      ],
       "redirectUris": [
         "http://localhost:5173/*",
         "http://127.0.0.1:5173/*",
         "http://localhost:4173/*",
-        "http://127.0.0.1:4173/*"
+        "http://127.0.0.1:4173/*",
+        "${TRANSFEROPS_WEB_ORIGIN}/*"
       ],
       "webOrigins": [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:4173",
-        "http://127.0.0.1:4173"
+        "http://127.0.0.1:4173",
+        "${TRANSFEROPS_WEB_ORIGIN}"
       ],
       "protocol": "openid-connect",
       "attributes": {

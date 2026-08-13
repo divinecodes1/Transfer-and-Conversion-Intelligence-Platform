@@ -82,12 +82,18 @@ export TF_VAR_subscription_id="$ARM_SUBSCRIPTION_ID"
 export TF_VAR_ai_api_key="sk-..."        # omit entirely for mock mode
 ```
 
-### 4. Build and push the image
+### 4. Build and push both images
+
+Two images: the API, and Keycloak with the realm and themes baked in.
 
 ```bash
 docker build -t ghcr.io/yourname/transfer-intelligence:latest .
+docker build -f infrastructure/docker/keycloak/Dockerfile \
+             -t ghcr.io/yourname/transfer-intelligence-keycloak:latest .
+
 echo "$GITHUB_TOKEN" | docker login ghcr.io -u yourname --password-stdin
 docker push ghcr.io/yourname/transfer-intelligence:latest
+docker push ghcr.io/yourname/transfer-intelligence-keycloak:latest
 ```
 
 Make the package **public** in GitHub → Packages → Package settings, so Container
@@ -115,25 +121,30 @@ Requires `allowed_client_ip` to admit you. It generates the synthetic portfolio
 and runs the same loader the local build uses, so the cloud warehouse is
 identical to the one the golden gate asserts against.
 
-### 7. Point the realm at the deployed console
+### 7. The realm — nothing to do
 
-`keycloak/realm-export.json` ships with localhost origins only, so sign-in will
-fail until the deployed URL is allowed.
+`keycloak/realm-export.json` declares its origins as
+`${TRANSFEROPS_WEB_ORIGIN}`, resolved at import time. Terraform passes the
+Static Web App's hostname, so the deployed console is an allowed redirect origin
+without anyone opening the admin console.
 
-```bash
-WEB_URL=$(terraform output -raw web_url)
-KC_URL=$(terraform output -raw keycloak_url)
-KC_PW=$(terraform output -raw keycloak_admin_password)
+Two things make this work, and both were failures worth naming:
 
-az containerapp exec --name ti-auth-student --resource-group rg-transfer-intelligence-student \
-  --command "/opt/keycloak/bin/kcadm.sh config credentials \
-      --server http://localhost:8080 --realm master --user kcadmin --password '$KC_PW'"
-```
+- **The realm is baked into the Keycloak image**
+  (`infrastructure/docker/keycloak/Dockerfile`). Container Apps cannot
+  bind-mount a single file the way compose does, so a stock `quay.io` image
+  would start with **no realm at all** and sign-in would be impossible.
+- **The image is pre-built** (`kc.sh build`), which is what makes
+  `start --optimized` valid and keeps the cold start short.
 
-Then add the redirect URI and web origin for `$WEB_URL` to the `transferops-api`
-client. The durable fix is to add your deployed origin to
-`keycloak/realm-export.json` and redeploy, so it is version-controlled like
-everything else.
+To add another origin permanently, edit the realm file and redeploy — it is
+version-controlled like everything else.
+
+> **Self-registration does not complete in Azure** unless you configure an SMTP
+> relay. `verifyEmail` is on, and with no relay Keycloak cannot send the
+> verification message. Locally, Mailpit catches it and the flow works end to
+> end. Set `keycloak_smtp_host` (and user/password) to restore it; otherwise use
+> the operator grant in step 9.
 
 ### 8. Configure and deploy the console
 
@@ -159,7 +170,17 @@ Then push, or run the Frontend workflow manually.
 ### 9. Grant yourself access
 
 A verified Keycloak account still holds no entitlement — that is the platform
-working as designed. Add yourself to `tr_gov`:
+working as designed, and it is the wall every first deployment hits.
+
+`deploy-azure-student.sh` does this for you, granting `PLATFORM_ADMIN` over all
+portfolios to the signed-in Azure user (the realm uses email as the username).
+Override with:
+
+```bash
+TRANSFEROPS_OPERATOR=you@university.edu ./scripts/deploy-azure-student.sh
+```
+
+To do it by hand, or to grant somebody else:
 
 ```sql
 INSERT INTO tr_gov.app_user (username, display_name, email)
@@ -254,7 +275,10 @@ repository.
 | Container App won't start | image not pullable | make the GHCR package public, or set registry credentials |
 | API returns 500 on `/health` | warehouse not loaded | `./scripts/seed-demo-data.sh` |
 | Loader can't connect | firewall | set `allowed_client_ip` and re-apply |
-| Sign-in redirects to an error | redirect URI not allowed | step 7 |
+| Sign-in redirects to an error | realm imported before the console existed | re-run the deploy script, or add the origin to the realm file and redeploy |
+| Keycloak starts then exits | `--optimized` without a built image | use the image from `infrastructure/docker/keycloak/`, not stock `quay.io` |
+| Login page 404s on the realm | realm never imported (no realm file in the image) | same — build the image in this repo |
 | "Your account is verified" screen | no entitlement | step 9 |
+| Registration never sends email | no SMTP relay in Azure | expected; set `keycloak_smtp_host` or use the operator grant |
 | First sign-in hangs ~60s | Keycloak cold start | expected; warm it first |
 | AI panels show placeholders | `ai_provider = "mock"` | expected; see [openai-configuration.md](openai-configuration.md) |
