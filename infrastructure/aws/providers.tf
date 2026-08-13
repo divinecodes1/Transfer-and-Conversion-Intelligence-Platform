@@ -46,12 +46,12 @@ provider "aws" {
 
   default_tags {
     tags = {
-      project      = "transfer-intelligence"
-      environment  = var.environment
-      owner        = var.owner
-      purpose      = "demo"
-      cost-center  = "education"
-      managed-by   = "terraform"
+      project     = "transfer-intelligence"
+      environment = var.environment
+      owner       = var.owner
+      purpose     = "demo"
+      cost-center = "education"
+      managed-by  = "terraform"
     }
   }
 }

@@ -107,8 +107,12 @@ variable "allowed_client_ip" {
 
 variable "keycloak_instance_type" {
   description = <<-EOT
-    t4g.micro: 2 vCPU burst, 1 GiB, Graviton. 750h/month free on the legacy tier,
-    roughly 6 USD/month otherwise.
+    t3.micro: 2 vCPU burst, 1 GiB, x86_64. 750h/month free on the legacy tier,
+    roughly 8 USD/month otherwise.
+
+    x86_64 rather than Graviton (t4g) because GitHub's runners are x86, and an
+    arm64 image would have to be built under QEMU. Both are equally free on the
+    tier that matters here -- see the note in keycloak.tf.
 
     This is where AWS beats the previous Azure design outright. Keycloak is a
     stateful JVM that cannot scale to zero, so on Container Apps it either cost
@@ -116,7 +120,7 @@ variable "keycloak_instance_type" {
     cold start. Here it simply runs, always warm, for nothing on the free tier.
   EOT
   type        = string
-  default     = "t4g.micro"
+  default     = "t3.micro"
 }
 
 variable "keycloak_volume_gb" {

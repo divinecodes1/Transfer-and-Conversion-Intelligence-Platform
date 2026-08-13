@@ -1,0 +1,112 @@
+#!/bin/bash
+# Keycloak host bootstrap.
+#
+# Runs once at first boot. Everything it needs -- the image, the realm, the
+# themes -- is in the container; this script only supplies configuration and
+# keeps the container running across reboots.
+#
+# Secrets are read from SSM Parameter Store using the instance role, never
+# baked into user data. User data is readable by anything that can reach the
+# instance metadata service, so a password written here would be a password
+# published to every process on the host.
+set -euxo pipefail
+
+dnf update -y
+dnf install -y docker awscli
+systemctl enable --now docker
+
+# Log in to ECR with the instance role. No stored registry credential.
+aws ecr get-login-password --region ${region} \
+  | docker login --username AWS --password-stdin ${registry}
+
+docker pull ${image}
+
+# Fetch configuration from SSM. --with-decryption resolves the SecureStrings.
+DB_PASSWORD="$(aws ssm get-parameter --region ${region} \
+  --name "${parameter_path}/db-master-password" --with-decryption \
+  --query Parameter.Value --output text)"
+ADMIN_PASSWORD="$(aws ssm get-parameter --region ${region} \
+  --name "${parameter_path}/keycloak-admin-password" --with-decryption \
+  --query Parameter.Value --output text)"
+
+# A systemd unit rather than `docker run` in user data: user data runs once, and
+# an instance that reboots without restarting Keycloak is an instance that looks
+# healthy and authenticates nobody.
+cat >/etc/systemd/system/keycloak.service <<UNIT
+[Unit]
+Description=Keycloak
+After=docker.service
+Requires=docker.service
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStartSec=300
+ExecStartPre=-/usr/bin/docker rm -f keycloak
+ExecStart=/usr/bin/docker run --rm --name keycloak \
+  -p 8080:8080 \
+  -e KC_DB=postgres \
+  -e KC_DB_URL='${jdbc_url}' \
+  -e KC_DB_USERNAME='${db_username}' \
+  -e KC_DB_PASSWORD='$DB_PASSWORD' \
+  -e KC_BOOTSTRAP_ADMIN_USERNAME='${admin_username}' \
+  -e KC_BOOTSTRAP_ADMIN_PASSWORD='$ADMIN_PASSWORD' \
+  -e KC_HOSTNAME_STRICT=false \
+  -e KC_HTTP_ENABLED=true \
+  -e KC_HEALTH_ENABLED=true \
+  -e KC_PROXY_HEADERS=xforwarded \
+  -e TRANSFEROPS_WEB_ORIGIN='${web_origin}' \
+  -e KEYCLOAK_SMTP_HOST='' \
+  -e KEYCLOAK_SMTP_PORT='587' \
+  -e KEYCLOAK_SMTP_FROM='no-reply@transferops.local' \
+  -e KEYCLOAK_SMTP_REPLY_TO='no-reply@transferops.local' \
+  -e KEYCLOAK_SMTP_USER='' \
+  -e KEYCLOAK_SMTP_PASSWORD='' \
+  -e KEYCLOAK_SMTP_AUTH='false' \
+  -e KEYCLOAK_SMTP_SSL='false' \
+  -e KEYCLOAK_SMTP_STARTTLS='false' \
+  ${image}
+ExecStop=/usr/bin/docker stop keycloak
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+# The realm's smtpServer block is written with placeholders and realm import
+# fails outright if they do not resolve -- hence every KEYCLOAK_SMTP_* above,
+# even though there is no relay. The honest consequence: Keycloak cannot send a
+# verification message, so SELF-REGISTRATION DOES NOT COMPLETE. The deploy
+# script grants the operator directly in tr_gov instead.
+
+# ---- Keycloak's database, BEFORE Keycloak starts ---------------------------
+#
+# Keycloak gets its own database on the shared instance and will not create it
+# itself. This runs first on purpose: `Restart=always` would eventually paper
+# over the wrong order, but the instance would spend its first minutes in a
+# crash loop and the logs would blame the database rather than the sequence.
+#
+# The loop is for RDS, not for the SQL: the instance can finish booting before
+# the database finishes becoming available.
+dnf install -y postgresql16 || dnf install -y postgresql15
+
+DB_HOST="$(echo '${jdbc_url}' | sed -E 's#jdbc:postgresql://([^:/]+).*#\1#')"
+export PGPASSWORD="$DB_PASSWORD"
+ADMIN_URI="postgresql://${db_username}@$DB_HOST:5432/transferops?sslmode=require"
+
+for attempt in $(seq 1 60); do
+  if psql "$ADMIN_URI" -tAc "SELECT 1" >/dev/null 2>&1; then
+    echo "database reachable after $attempt attempt(s)"
+    break
+  fi
+  sleep 10
+done
+
+# CREATE DATABASE cannot run inside a transaction and has no IF NOT EXISTS, so
+# it is guarded by a lookup rather than by swallowing the error -- a swallowed
+# error here would hide a genuine connection failure.
+if ! psql "$ADMIN_URI" -tAc "SELECT 1 FROM pg_database WHERE datname='keycloak'" | grep -q 1; then
+  psql "$ADMIN_URI" -c "CREATE DATABASE keycloak"
+fi
+
+systemctl daemon-reload
+systemctl enable --now keycloak

@@ -1,0 +1,51 @@
+# Copy to terraform.tfvars and edit. terraform.tfvars is gitignored, which is
+# why a personal email address belongs here and not in variables.tf.
+#
+# Secrets do NOT go in this file even though Terraform would accept them:
+#   export TF_VAR_ai_api_key="gsk_..."
+
+# ---- Region -----------------------------------------------------------------
+region      = "eu-central-1"
+prefix      = "ti"
+environment = "student"
+owner       = "your-name"
+
+# ---- Budget: set this, it is the only warning you get -----------------------
+# AWS does not stop spending when a budget is exceeded. Thresholds fire at
+# 50/75/90/100%, so 30 warns at 15, 22.50, 27 and 30, plus a forecast alert.
+# A second, annual budget tracks cumulative burn -- the failure mode that
+# actually ends a student account.
+monthly_budget_amount = 30
+budget_alert_emails   = ["you@university.edu"]
+
+# ---- Database ---------------------------------------------------------------
+# Your public IP in CIDR form, so the loader can reach RDS from this machine.
+#   curl -s https://checkip.amazonaws.com
+allowed_client_ip = ""
+
+# ---- CI ---------------------------------------------------------------------
+# owner/name of this repository. Creates the IAM OIDC provider and the role
+# GitHub Actions assumes -- no access key, and no directory administrator
+# required, which is what makes CI deployment possible here and not on Azure.
+github_repository = "divinecodes1/Transfer-and-Conversion-Intelligence-Platform"
+
+# ---- AI ---------------------------------------------------------------------
+# mock needs no key, no credits and no provider account, and every AI surface
+# still works. Similarity and delay risk never used a model at all.
+ai_provider = "mock"
+
+# Groq, or any OpenAI-compatible endpoint, reuses the openai adapter:
+#   ai_provider = "openai"
+#   ai_model    = "openai/gpt-oss-20b"
+#   ai_base_url = "https://api.groq.com/openai/v1"
+#   export TF_VAR_ai_api_key="gsk_..."
+
+ai_daily_request_cap = 50
+
+# ---- Identity ---------------------------------------------------------------
+auth_mode = "enforce"
+
+# Optional SSH key for the Keycloak host. Leave empty: there is no SSH ingress
+# rule at all, and SSM Session Manager needs no open port and no key to lose.
+#   aws ssm start-session --target $(terraform output -raw keycloak_instance_id)
+ssh_public_key = ""

@@ -77,9 +77,9 @@ resource "aws_db_instance" "main" {
 
   # Minor versions land in a predictable window rather than whenever AWS
   # chooses; major upgrades stay manual.
-  auto_minor_version_upgrade  = true
-  maintenance_window          = "Sun:03:00-Sun:04:00"
-  backup_window               = "02:00-03:00"
+  auto_minor_version_upgrade   = true
+  maintenance_window           = "Sun:03:00-Sun:04:00"
+  backup_window                = "02:00-03:00"
   performance_insights_enabled = false # the free window is 7 days; off is simpler and certainly free
 
   tags = { Name = "${local.name}-db" }
