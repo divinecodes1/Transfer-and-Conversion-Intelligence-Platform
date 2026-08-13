@@ -2,8 +2,8 @@
 # The console: S3 behind CloudFront.
 #
 # The console is a Vite SPA -- static files, no server runtime -- so this is not
-# a compromise but an exact fit. CloudFront's always-free tier includes 1 TB out
-# and 10M requests a month, which a demo will never approach.
+# a compromise but an exact fit. Requests and transfer are usage-based and stay
+# small for a demo; the cost budgets still observe them.
 #
 # CloudFront rather than an S3 website endpoint, for one reason that is not
 # optional: S3 website endpoints are HTTP only. The console carries a bearer

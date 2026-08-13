@@ -2,7 +2,7 @@
 # why a personal email address belongs here and not in variables.tf.
 #
 # Secrets do NOT go in this file even though Terraform would accept them:
-#   export TF_VAR_ai_api_key="gsk_..."
+#   export TF_VAR_ai_api_key="your-model-provider-key"
 
 # ---- Region -----------------------------------------------------------------
 region      = "eu-central-1"
@@ -12,16 +12,15 @@ owner       = "your-name"
 
 # ---- Budget: set this, it is the only warning you get -----------------------
 # AWS does not stop spending when a budget is exceeded. Thresholds fire at
-# 50/75/90/100%, so 30 warns at 15, 22.50, 27 and 30, plus a forecast alert.
-# A second, annual budget tracks cumulative burn -- the failure mode that
-# actually ends a student account.
-monthly_budget_amount = 30
+# 50/75/90/100%. Credits are excluded from the calculation so they do not hide
+# the gross rate at which the Free Plan balance is being consumed.
+monthly_budget_amount          = 15
+free_plan_credit_budget_amount = 90
+free_plan_expiration_date      = "2027-02-13"
 budget_alert_emails   = ["you@university.edu"]
 
-# ---- Database ---------------------------------------------------------------
-# Your public IP in CIDR form, so the loader can reach RDS from this machine.
-#   curl -s https://checkip.amazonaws.com
-allowed_client_ip = ""
+# RDS has no public address. The deployment loads it through a constrained SSM
+# document on the Keycloak/NAT instance inside the VPC.
 
 # ---- CI ---------------------------------------------------------------------
 # owner/name of this repository. Creates the IAM OIDC provider and the role
@@ -38,7 +37,7 @@ ai_provider = "mock"
 #   ai_provider = "openai"
 #   ai_model    = "openai/gpt-oss-20b"
 #   ai_base_url = "https://api.groq.com/openai/v1"
-#   export TF_VAR_ai_api_key="gsk_..."
+#   export TF_VAR_ai_api_key="your-model-provider-key"
 
 ai_daily_request_cap = 50
 
@@ -49,3 +48,17 @@ auth_mode = "enforce"
 # rule at all, and SSM Session Manager needs no open port and no key to lose.
 #   aws ssm start-session --target $(terraform output -raw keycloak_instance_id)
 ssh_public_key = ""
+
+# ---- SMTP -------------------------------------------------------------------
+# Gmail works without a domain (use a dedicated account and an App Password).
+# For SES sandbox, both sender and recipient addresses must be verified.
+smtp_host       = "smtp.gmail.com"
+smtp_port       = 587
+smtp_from       = "your-verified-address@gmail.com"
+smtp_reply_to   = "your-verified-address@gmail.com"
+smtp_username   = "your-verified-address@gmail.com"
+smtp_auth       = true
+smtp_ssl        = false
+smtp_starttls   = true
+# PowerShell: $env:TF_VAR_smtp_password = "your-app-password"
+# Bash:       export TF_VAR_smtp_password="your-app-password"

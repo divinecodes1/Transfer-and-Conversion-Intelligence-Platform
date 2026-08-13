@@ -3,10 +3,10 @@
 #
 # The shape, and why each piece is what it is:
 #
-#   console    S3 + CloudFront          static files, no server, free tier
-#   API        Lambda + Function URL    scales to zero, 1M requests/month free
-#   identity   Keycloak on EC2 t4g.micro   always warm, free on the legacy tier
-#   warehouse  RDS PostgreSQL t4g.micro    the one standing charge
+#   console    S3 + CloudFront          static files, no server process
+#   API/agent  three Lambda functions   API, assistant and nightly refresh
+#   identity   CloudFront -> Keycloak   HTTPS without a domain
+#   warehouse  private RDS PostgreSQL   no public ingress
 #   pipeline   EventBridge -> Lambda       runs for seconds, once a night
 #   secrets    SSM Parameter Store      free, where Secrets Manager is 0.40/secret
 #   CI         GitHub OIDC -> IAM role  no stored credential, no directory admin
@@ -60,61 +60,22 @@ resource "random_password" "keycloak_admin" {
   special = false
 }
 
-# ---- Container registry -----------------------------------------------------
-# 500 MB is free on the legacy tier and the images are larger than that, so the
-# lifecycle policy is not housekeeping -- it is the difference between free and
-# a slowly growing charge.
-
-resource "aws_ecr_repository" "api" {
-  name                 = "${local.name}-api"
-  image_tag_mutability = "MUTABLE"
-  force_delete         = true # a demo registry should never block a teardown
-
-  image_scanning_configuration {
-    scan_on_push = true
+check "smtp_configuration" {
+  assert {
+    condition = var.smtp_host == "" || (
+      var.smtp_from != "" && (!var.smtp_auth || (var.smtp_username != "" && var.smtp_password != ""))
+    )
+    error_message = "SMTP requires smtp_from; authenticated SMTP also requires smtp_username and smtp_password."
   }
 }
 
-resource "aws_ecr_repository" "keycloak" {
-  name                 = "${local.name}-keycloak"
-  image_tag_mutability = "MUTABLE"
-  force_delete         = true
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
+# ECR is deliberately owned by infrastructure/aws/bootstrap. The repositories
+# must exist before the first application apply because Lambda validates that
+# its image URI exists while creating the function.
+data "aws_ecr_repository" "api" {
+  name = "${local.name}-api"
 }
 
-resource "aws_ecr_lifecycle_policy" "api" {
-  repository = aws_ecr_repository.api.name
-
-  policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "Keep the three most recent images; older ones are rebuildable."
-      selection = {
-        tagStatus   = "any"
-        countType   = "imageCountMoreThan"
-        countNumber = 3
-      }
-      action = { type = "expire" }
-    }]
-  })
-}
-
-resource "aws_ecr_lifecycle_policy" "keycloak" {
-  repository = aws_ecr_repository.keycloak.name
-
-  policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "Keep the three most recent images."
-      selection = {
-        tagStatus   = "any"
-        countType   = "imageCountMoreThan"
-        countNumber = 3
-      }
-      action = { type = "expire" }
-    }]
-  })
+data "aws_ecr_repository" "keycloak" {
+  name = "${local.name}-keycloak"
 }

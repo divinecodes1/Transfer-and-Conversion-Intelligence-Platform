@@ -10,10 +10,8 @@
 # the student credit, spent almost entirely on idle time -- or make every first
 # sign-in of the day wait a minute.
 #
-# A t4g.micro is 750 hours a month free on the legacy tier, which is more hours
-# than a month contains. It simply runs. Always warm, no cold start, and on the
-# free tier no bill. Off the free tier it is about 6 USD/month, still a sixth of
-# the Azure figure.
+# A micro instance simply runs: always warm and also available as the private
+# subnet NAT instance. Its hourly usage draws the current Free Plan credit.
 #
 # The instance runs the same image the Azure deployment used -- realm and themes
 # baked in -- because EC2 has no bind mount from a laptop either.
@@ -26,9 +24,8 @@
 # minutes instead of seconds, and a class of "works locally, fails in CI" bugs
 # that have nothing to do with this application.
 #
-# t3.micro is also 750h/month on the legacy free tier, so on the tier that
-# matters here the two cost exactly the same: nothing. The 10% only appears
-# after the free tier ends, and it is not worth an emulated build pipeline.
+# The small architecture saving is not worth an emulated multi-architecture
+# build pipeline for this repository.
 data "aws_ami" "al2023" {
   most_recent = true
   owners      = ["amazon"]
@@ -122,6 +119,7 @@ resource "aws_instance" "keycloak" {
   vpc_security_group_ids = [aws_security_group.keycloak.id]
   iam_instance_profile   = aws_iam_instance_profile.keycloak.name
   key_name               = var.ssh_public_key == "" ? null : aws_key_pair.keycloak[0].key_name
+  source_dest_check      = false
 
   root_block_device {
     volume_size = var.keycloak_volume_gb
@@ -136,14 +134,21 @@ resource "aws_instance" "keycloak" {
   user_data_replace_on_change = true
   user_data = templatefile("${path.module}/keycloak-user-data.sh.tftpl", {
     region         = var.region
-    registry       = split("/", aws_ecr_repository.keycloak.repository_url)[0]
-    image          = "${aws_ecr_repository.keycloak.repository_url}:latest"
+    registry       = split("/", data.aws_ecr_repository.keycloak.repository_url)[0]
+    image          = "${data.aws_ecr_repository.keycloak.repository_url}:latest"
     parameter_path = "/${local.name}"
     jdbc_url       = local.keycloak_jdbc_url
     db_username    = var.db_username
     admin_username = "kcadmin"
     web_origin     = "https://${aws_cloudfront_distribution.console.domain_name}"
-    public_ip      = aws_eip.keycloak.public_ip
+    smtp_host      = var.smtp_host
+    smtp_port      = var.smtp_port
+    smtp_from      = var.smtp_from
+    smtp_reply_to  = var.smtp_reply_to
+    smtp_username  = var.smtp_username
+    smtp_auth      = var.smtp_auth
+    smtp_ssl       = var.smtp_ssl
+    smtp_starttls  = var.smtp_starttls
   })
 
   tags = { Name = "${local.name}-keycloak" }

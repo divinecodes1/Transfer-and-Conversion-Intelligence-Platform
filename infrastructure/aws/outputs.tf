@@ -20,12 +20,17 @@ output "api_url" {
   value       = aws_lambda_function_url.api.function_url
 }
 
+output "assistant_url" {
+  description = "HTTPS Lambda Function URL for the reporting assistant."
+  value       = aws_lambda_function_url.assistant.function_url
+}
+
 output "keycloak_url" {
   description = <<-EOT
     Keycloak on EC2. Admin console at /admin, realm at /realms/transferops.
     Always warm -- no cold start, unlike the previous Container Apps deployment.
   EOT
-  value       = "http://${aws_eip.keycloak.public_ip}:8080"
+  value       = "https://${aws_cloudfront_distribution.keycloak.domain_name}"
 }
 
 output "keycloak_instance_id" {
@@ -51,11 +56,11 @@ output "cloudfront_distribution_id" {
 }
 
 output "ecr_api_repository" {
-  value = aws_ecr_repository.api.repository_url
+  value = data.aws_ecr_repository.api.repository_url
 }
 
 output "ecr_keycloak_repository" {
-  value = aws_ecr_repository.keycloak.repository_url
+  value = data.aws_ecr_repository.keycloak.repository_url
 }
 
 output "api_function_name" {
@@ -65,6 +70,10 @@ output "api_function_name" {
 output "refresh_function_name" {
   value = aws_lambda_function.refresh.function_name
 }
+
+output "assistant_function_name" { value = aws_lambda_function.assistant.function_name }
+output "keycloak_rollout_document" { value = aws_ssm_document.keycloak_rollout.name }
+output "warehouse_seed_document" { value = aws_ssm_document.warehouse_seed.name }
 
 output "github_actions_role_arn" {
   description = <<-EOT
@@ -91,8 +100,8 @@ output "database_password" {
 
 output "loader_dsn" {
   description = <<-EOT
-    For: python etl/run.py --engine postgres --dsn "$(terraform output -raw loader_dsn)"
-    Requires allowed_client_ip to have been set, or the security group refuses it.
+    Stored for the constrained SSM warehouse-seed document. RDS is private, so
+    this DSN is not reachable from an operator laptop.
   EOT
   value       = local.dsn.admin
   sensitive   = true
@@ -126,18 +135,19 @@ output "keycloak_admin_password" {
 output "cost_posture" {
   description = "What this stack bills, so the number is visible rather than discovered."
   value = join("\n", [
-    "CloudFront + S3     console            free tier: 1TB/month out, always free",
-    "Lambda (api)        ${var.api_memory_mb}MB, scales to zero   free tier: 1M requests/month, ALWAYS free",
+    "CloudFront + S3     console + identity ingress; usage-based under the current plan",
+    "Lambda (api + assistant + refresh) scales to zero; usage consumes Free Plan credit after any allowance",
     "Lambda (refresh)    nightly, ~seconds  negligible",
-    "EC2 ${var.keycloak_instance_type} (keycloak)  ALWAYS ON          free on the legacy 12-month tier; ~6 USD/month otherwise",
-    "RDS ${var.db_instance_class}      ALWAYS ON          free on the legacy 12-month tier; ~13 USD/month otherwise -- the largest charge",
-    "ECR                 3 images kept      free tier: 500MB",
+    "EC2 ${var.keycloak_instance_type} (keycloak + NAT) ALWAYS ON; current pricing draws Free Plan credit",
+    "RDS ${var.db_instance_class} private, ALWAYS ON; the largest standing charge",
+    "Public IPv4         one attached EIP; AWS charges 0.005 USD/hour (~3.65/month)",
+    "ECR                 3 images kept per repository to cap storage growth",
     "SSM Parameter Store standard params    free (Secrets Manager would be 0.40/secret/month)",
-    "CloudWatch Logs     ${var.log_retention_days}-day retention     free tier: 5GB/month",
+    "CloudWatch Logs     ${var.log_retention_days}-day retention caps storage growth",
     "NAT Gateway         NOT PROVISIONED    would be ~32 USD/month",
     "",
-    "Legacy 12-month free tier: roughly 0 USD/month.",
-    "Credit-based tier:         roughly 20 USD/month, dominated by RDS + EC2.",
-    "Check which you have:      aws freetier get-free-tier-usage --region us-east-1",
+    "Budget calculations exclude credits so alerts show gross burn before the balance disappears.",
+    "Free Plan expiration configured: ${var.free_plan_expiration_date == "" ? "not set" : var.free_plan_expiration_date}",
+    "Check current plan: aws freetier get-account-plan-state --region us-east-1",
   ])
 }

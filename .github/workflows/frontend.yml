@@ -3,9 +3,8 @@ name: Frontend
 # Build the console and publish it to S3 behind CloudFront.
 #
 # The console is a Vite SPA -- static files, no server runtime -- which is why
-# S3 + CloudFront is an exact fit rather than a compromise, and why it costs
-# nothing: CloudFront's always-free tier covers 1 TB out and 10M requests a
-# month.
+# S3 + CloudFront is an exact fit rather than a compromise. Usage remains small
+# for a demo and is covered by the stack's gross-cost budgets.
 #
 # Everything under VITE_* is compiled into the bundle and is therefore PUBLIC.
 # Only values safe in a browser appear below. tests/web_checks.py asserts the

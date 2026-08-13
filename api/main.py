@@ -1104,5 +1104,7 @@ def project_detail(project_id: str):
 # serves every endpoint above, and /ai/status says plainly that it is switched
 # off rather than failing at import.
 from .ai_routes import router as ai_router  # noqa: E402
+from .assistant_routes import router as assistant_router  # noqa: E402
 
 app.include_router(ai_router)
+app.include_router(assistant_router)

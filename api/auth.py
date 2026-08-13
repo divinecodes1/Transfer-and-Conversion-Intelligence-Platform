@@ -48,6 +48,7 @@ log = logging.getLogger("transferops.auth")
 # verification changes between the two, which is why the deployment needs no
 # second identity provider.
 KEYCLOAK_URL = os.environ.get("KEYCLOAK_URL", "http://localhost:8080")
+KEYCLOAK_JWKS_URL = os.environ.get("KEYCLOAK_JWKS_URL", KEYCLOAK_URL)
 KEYCLOAK_REALM = os.environ.get("KEYCLOAK_REALM", "transferops")
 KEYCLOAK_AUDIENCE = os.environ.get("KEYCLOAK_AUDIENCE", "transferops-api")
 
@@ -132,7 +133,7 @@ def _jwks():
     with _JWKS_LOCK:
         if _JWKS["keys"] is None or now - _JWKS["fetched_at"] > JWKS_TTL_SECONDS:
             import httpx
-            url = f"{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs"
+            url = f"{KEYCLOAK_JWKS_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs"
             _JWKS["keys"] = httpx.get(url, timeout=5.0).json()
             _JWKS["fetched_at"] = now
         return _JWKS["keys"]

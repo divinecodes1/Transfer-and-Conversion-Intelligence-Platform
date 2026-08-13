@@ -2,17 +2,13 @@
 # Transfer & Conversion Intelligence Platform :: student-tier AWS inputs.
 #
 # Every default is the cheapest option that still demonstrates the architecture.
-# Where a default can cost money, the comment says how much and under what
-# conditions -- because AWS has two different free tiers and which one you are on
-# changes the monthly bill from roughly zero to roughly twenty dollars:
+# Where a default can cost money, the comment names the cost driver.
 #
-#   Legacy 12-month tier  750h/month of t4g.micro RDS and EC2, free for a year.
-#                         The stack costs essentially nothing.
-#   Newer credit tier     a credit balance, no free service-hours. Everything
-#                         draws it down.
+# New accounts use the six-month credit-based Free Plan. Detect it with the
+# current account-plan API: aws freetier get-account-plan-state.
 #
 # Check which you have:
-#   aws freetier get-free-tier-usage --region us-east-1
+#   aws freetier get-account-plan-state --region us-east-1
 #   (or Billing console -> Free Tier)
 #
 # The design assumes the WORSE case and minimises standing charges regardless.
@@ -57,10 +53,26 @@ variable "monthly_budget_amount" {
   description = <<-EOT
     Monthly budget in USD. Alerts only -- AWS does not stop spending when a
     budget is exceeded, and on a credit account the credit simply drains.
-    Thresholds fire at 50/75/90/100%, so 30 warns at 15, 22.50, 27 and 30.
+    Thresholds fire at 50/75/90/100%; the default 15 warns early at 7.50.
   EOT
   type        = number
-  default     = 30
+  default     = 15
+}
+
+variable "free_plan_credit_budget_amount" {
+  description = "Gross annual usage alert; credits are deliberately excluded from the cost calculation."
+  type        = number
+  default     = 90
+}
+
+variable "free_plan_expiration_date" {
+  description = "Informational YYYY-MM-DD date from Billing; deployment scripts warn as it approaches."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.free_plan_expiration_date == "" || can(regex("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", var.free_plan_expiration_date))
+    error_message = "free_plan_expiration_date must be blank or YYYY-MM-DD."
+  }
 }
 
 variable "budget_alert_emails" {
@@ -73,16 +85,15 @@ variable "budget_alert_emails" {
 
 variable "db_instance_class" {
   description = <<-EOT
-    RDS instance class. db.t4g.micro is the smallest Graviton burstable and is
-    what the legacy free tier covers for 750h/month. Off the free tier it is
-    roughly 12-13 USD/month, and it is the single largest standing charge here.
+    RDS instance class. db.t4g.micro is the smallest Graviton burstable and the
+    single largest standing charge here; current regional pricing applies.
   EOT
   type        = string
   default     = "db.t4g.micro"
 }
 
 variable "db_allocated_storage" {
-  description = "GB. 20 is the RDS floor and matches the free-tier allowance."
+  description = "GB. 20 is the RDS floor and bounds the standing storage charge."
   type        = number
   default     = 20
 }
@@ -93,38 +104,25 @@ variable "db_username" {
   default     = "transferops_admin"
 }
 
-variable "allowed_client_ip" {
-  description = <<-EOT
-    Your public IP in CIDR form, e.g. "203.0.113.42/32", so the loader and psql
-    can reach the database. Empty means no operator rule is created.
-      curl -s https://checkip.amazonaws.com
-  EOT
-  type        = string
-  default     = ""
-}
-
 # ---- Keycloak (EC2) --------------------------------------------------------
 
 variable "keycloak_instance_type" {
   description = <<-EOT
-    t3.micro: 2 vCPU burst, 1 GiB, x86_64. 750h/month free on the legacy tier,
-    roughly 8 USD/month otherwise.
+    t3.micro: 2 vCPU burst, 1 GiB, x86_64. It runs continuously and consumes
+    current Free Plan credit at the regional EC2 price.
 
     x86_64 rather than Graviton (t4g) because GitHub's runners are x86, and an
-    arm64 image would have to be built under QEMU. Both are equally free on the
-    tier that matters here -- see the note in keycloak.tf.
+    arm64 image would have to be built under QEMU; see the note in keycloak.tf.
 
-    This is where AWS beats the previous Azure design outright. Keycloak is a
-    stateful JVM that cannot scale to zero, so on Container Apps it either cost
-    ~34 USD/month held warm or made every first sign-in wait 40-60 seconds for a
-    cold start. Here it simply runs, always warm, for nothing on the free tier.
+    Keycloak is a stateful JVM that cannot scale to zero without disruptive cold
+    starts. The instance keeps authentication warm and also supplies NAT egress.
   EOT
   type        = string
   default     = "t3.micro"
 }
 
 variable "keycloak_volume_gb" {
-  description = "Root volume. 8 GB is enough for the OS and one container image; 30 GB is free on the legacy tier."
+  description = "Root volume. 8 GB is enough for the OS and one retained container image."
   type        = number
   default     = 8
 }
@@ -137,6 +135,48 @@ variable "ssh_public_key" {
   EOT
   type        = string
   default     = ""
+}
+
+# ---- Registration/recovery email ------------------------------------------
+
+variable "smtp_host" {
+  description = "SMTP relay hostname. Blank disables outbound registration/recovery mail."
+  type        = string
+  default     = ""
+}
+
+variable "smtp_port" {
+  type    = number
+  default = 587
+}
+variable "smtp_from" {
+  type    = string
+  default = ""
+}
+variable "smtp_reply_to" {
+  type    = string
+  default = ""
+}
+variable "smtp_username" {
+  type    = string
+  default = ""
+}
+variable "smtp_password" {
+  type      = string
+  default   = ""
+  sensitive = true
+}
+variable "smtp_auth" {
+  type    = bool
+  default = true
+}
+variable "smtp_ssl" {
+  type    = bool
+  default = false
+}
+variable "smtp_starttls" {
+  type    = bool
+  default = true
 }
 
 # ---- API (Lambda) ----------------------------------------------------------
@@ -174,16 +214,6 @@ variable "api_image_tag" {
   description = "Tag of the API image in ECR. The deploy script builds and pushes it."
   type        = string
   default     = "latest"
-}
-
-variable "keycloak_image" {
-  description = <<-EOT
-    Keycloak image with the realm and themes baked in. Built from
-    infrastructure/docker/keycloak/Dockerfile and pushed to ECR, because the EC2
-    host pulls it at boot and a bind mount does not exist there either.
-  EOT
-  type        = string
-  default     = ""
 }
 
 # ---- Application configuration ---------------------------------------------

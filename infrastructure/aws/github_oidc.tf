@@ -69,6 +69,7 @@ data "aws_iam_policy_document" "github_assume" {
       ]
     }
   }
+
 }
 
 resource "aws_iam_role" "github_actions" {
@@ -107,8 +108,8 @@ data "aws_iam_policy_document" "github_deploy" {
       "ecr:GetDownloadUrlForLayer",
     ]
     resources = [
-      aws_ecr_repository.api.arn,
-      aws_ecr_repository.keycloak.arn,
+      data.aws_ecr_repository.api.arn,
+      data.aws_ecr_repository.keycloak.arn,
     ]
   }
 
@@ -124,6 +125,7 @@ data "aws_iam_policy_document" "github_deploy" {
     ]
     resources = [
       aws_lambda_function.api.arn,
+      aws_lambda_function.assistant.arn,
       aws_lambda_function.refresh.arn,
     ]
   }
@@ -148,6 +150,21 @@ data "aws_iam_policy_document" "github_deploy" {
     sid       = "CloudFrontInvalidate"
     actions   = ["cloudfront:CreateInvalidation", "cloudfront:GetInvalidation"]
     resources = [aws_cloudfront_distribution.console.arn]
+  }
+
+  statement {
+    sid     = "KeycloakRollout"
+    actions = ["ssm:SendCommand"]
+    resources = [
+      aws_ssm_document.keycloak_rollout.arn,
+      aws_instance.keycloak.arn,
+    ]
+  }
+
+  statement {
+    sid       = "KeycloakRolloutStatus"
+    actions   = ["ssm:GetCommandInvocation"]
+    resources = ["*"]
   }
 }
 

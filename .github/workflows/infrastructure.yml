@@ -1,14 +1,9 @@
-name: Infrastructure
+name: Infrastructure validation
 
-# Terraform validation on every change; apply only when a human asks.
-#
-# The asymmetry is deliberate. `plan` is free and safe, so it runs
-# automatically. `apply` creates billable resources on a finite free tier, so it
-# is workflow_dispatch with a typed confirmation -- infrastructure that reaches
-# production because someone merged a branch is the failure this guards against.
-#
-# `destroy` is here too, gated the same way, because the ability to tear the
-# stack down is the most important cost control in the repository.
+# Terraform state is intentionally local for this Free Plan stack. CI therefore
+# validates both roots but never pretends it can safely plan/apply without the
+# operator's state. Provision with deploy-aws-student.ps1/.sh; backend.yml owns
+# repeatable image and Keycloak rollouts after that first deployment.
 
 on:
   push:
@@ -20,135 +15,34 @@ on:
     paths:
       - "infrastructure/aws/**"
   workflow_dispatch:
-    inputs:
-      action:
-        description: "What to run"
-        type: choice
-        options: [plan, apply, destroy]
-        default: plan
-      confirm:
-        description: "Type the environment name (student) to allow apply/destroy"
-        type: string
-        default: ""
 
 permissions:
-  id-token: write
   contents: read
-
-env:
-  TF_DIR: infrastructure/aws
-  TF_VERSION: "1.9.8"
 
 jobs:
   validate:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        directory:
+          - infrastructure/aws/bootstrap
+          - infrastructure/aws
     steps:
       - uses: actions/checkout@v4
 
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: ${{ env.TF_VERSION }}
+          terraform_version: "1.9.8"
 
-      # No cloud credentials needed, so this runs on forks and pull requests
-      # where the role assumption would fail.
       - name: Format
-        working-directory: ${{ env.TF_DIR }}
-        run: terraform fmt -check -recursive -diff
+        working-directory: ${{ matrix.directory }}
+        run: terraform fmt -check -diff
 
-      - name: Init (no backend)
-        working-directory: ${{ env.TF_DIR }}
+      - name: Init without backend
+        working-directory: ${{ matrix.directory }}
         run: terraform init -backend=false
 
       - name: Validate
-        working-directory: ${{ env.TF_DIR }}
+        working-directory: ${{ matrix.directory }}
         run: terraform validate
-
-  plan:
-    needs: validate
-    if: vars.AWS_DEPLOY_ENABLED == 'true' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    environment: production-demo
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      - name: Plan
-        working-directory: ${{ env.TF_DIR }}
-        env:
-          TF_VAR_ai_api_key: ${{ secrets.TRANSFEROPS_AI_API_KEY }}
-        run: |
-          terraform init
-          terraform plan -no-color -input=false
-
-  apply:
-    needs: validate
-    if: github.event_name == 'workflow_dispatch' && inputs.action == 'apply'
-    runs-on: ubuntu-latest
-    environment: production-demo
-    steps:
-      # A dropdown alone is one mis-click. The typed value is the second hand.
-      - name: Require confirmation
-        if: inputs.confirm != 'student'
-        run: |
-          echo "::error::Type 'student' in the confirm field to apply."
-          exit 1
-
-      - uses: actions/checkout@v4
-
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      - name: Apply
-        working-directory: ${{ env.TF_DIR }}
-        env:
-          TF_VAR_ai_api_key: ${{ secrets.TRANSFEROPS_AI_API_KEY }}
-        run: |
-          terraform init
-          terraform apply -auto-approve -input=false
-
-      - name: What this now costs
-        working-directory: ${{ env.TF_DIR }}
-        run: terraform output -raw cost_posture
-
-  destroy:
-    needs: validate
-    if: github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
-    runs-on: ubuntu-latest
-    environment: production-demo
-    steps:
-      - name: Require confirmation
-        if: inputs.confirm != 'student'
-        run: |
-          echo "::error::Type 'student' in the confirm field to destroy."
-          exit 1
-
-      - uses: actions/checkout@v4
-
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      - name: Destroy
-        working-directory: ${{ env.TF_DIR }}
-        run: |
-          terraform init
-          terraform destroy -auto-approve -input=false

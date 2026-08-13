@@ -49,6 +49,13 @@ resource "aws_ssm_parameter" "keycloak_admin_password" {
   value       = random_password.keycloak_admin.result
 }
 
+resource "aws_ssm_parameter" "smtp_password" {
+  count = var.smtp_password == "" ? 0 : 1
+  name  = "/${local.name}/smtp-password"
+  type  = "SecureString"
+  value = var.smtp_password
+}
+
 # Only created when a key is supplied. An empty SecureString is rejected, and a
 # parameter holding "" would be indistinguishable from a real but blank key.
 resource "aws_ssm_parameter" "ai_api_key" {
@@ -64,7 +71,7 @@ resource "aws_ssm_parameter" "ai_api_key" {
 # separate lookups and get the escaping wrong.
 resource "aws_ssm_parameter" "loader_dsn" {
   name        = "/${local.name}/loader-dsn"
-  description = "Admin DSN for etl/run.py. Requires allowed_client_ip to reach it."
+  description = "Admin DSN consumed by the constrained in-VPC SSM seed document."
   type        = "SecureString"
   value       = local.dsn.admin
 }

@@ -55,12 +55,16 @@ tf() { terraform output -raw "$1" 2>/dev/null || true; }
 ROLE_ARN="$(tf github_actions_role_arn)"
 REGION="$(tf region)"
 API_URL="$(tf api_url)"
+ASSISTANT_URL="$(tf assistant_url)"
 CONSOLE_URL="$(tf console_url)"
 KEYCLOAK_URL="$(tf keycloak_url)"
 CONSOLE_BUCKET="$(tf console_bucket)"
 DIST_ID="$(tf cloudfront_distribution_id)"
 API_FN="$(tf api_function_name)"
 REFRESH_FN="$(tf refresh_function_name)"
+ASSISTANT_FN="$(tf assistant_function_name)"
+KEYCLOAK_INSTANCE="$(tf keycloak_instance_id)"
+KEYCLOAK_ROLLOUT_DOCUMENT="$(tf keycloak_rollout_document)"
 
 # ECR repository names, not URLs: amazon-ecr-login supplies the registry host.
 API_REPO="$(basename "$(tf ecr_api_repository)")"
@@ -96,6 +100,9 @@ set_secret AWS_ECR_API_REPOSITORY          "${API_REPO}"
 set_secret AWS_ECR_KEYCLOAK_REPOSITORY     "${KC_REPO}"
 set_secret AWS_API_FUNCTION                "${API_FN}"
 set_secret AWS_REFRESH_FUNCTION            "${REFRESH_FN}"
+set_secret AWS_ASSISTANT_FUNCTION          "${ASSISTANT_FN}"
+set_secret AWS_KEYCLOAK_INSTANCE           "${KEYCLOAK_INSTANCE}"
+set_secret AWS_KEYCLOAK_ROLLOUT_DOCUMENT   "${KEYCLOAK_ROLLOUT_DOCUMENT}"
 set_secret AWS_CONSOLE_BUCKET              "${CONSOLE_BUCKET}"
 set_secret AWS_CLOUDFRONT_DISTRIBUTION_ID  "${DIST_ID}"
 
@@ -111,11 +118,14 @@ set_var() {
 
 set_var AWS_REGION       "${REGION}"
 set_var AWS_API_URL      "${API_URL}"
+set_var AWS_ASSISTANT_URL "${ASSISTANT_URL}"
 set_var AWS_CONSOLE_URL  "${CONSOLE_URL}"
+set_var AWS_KEYCLOAK_URL "${KEYCLOAK_URL}"
 
 # Compiled into the bundle and therefore PUBLIC. Only values safe to publish
 # appear here; tests/web_checks.py asserts the built console holds no key.
 set_var VITE_TRANSFEROPS_API    "${API_URL}"
+set_var VITE_TRANSFEROPS_AGENT  "${ASSISTANT_URL}"
 set_var VITE_KEYCLOAK_URL       "${KEYCLOAK_URL}"
 set_var VITE_KEYCLOAK_REALM     "transferops"
 set_var VITE_KEYCLOAK_CLIENT_ID "transferops-api"

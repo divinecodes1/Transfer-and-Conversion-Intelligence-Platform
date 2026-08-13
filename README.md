@@ -116,42 +116,49 @@ works unchanged. That is the state CI runs in. See [The AI layer](#the-ai-layer)
 
 ## AWS Student Deployment
 
-A public demo on AWS. **Near zero on the legacy 12-month free tier**, roughly
-20 USD/month on the newer credit-based tier — the difference is which tier your
-account has, so check first:
+A public demo on the current six-month AWS credit Free Plan. Check the account
+plan before provisioning; usage consumes the promotional balance:
 
 ```bash
-aws freetier get-free-tier-usage --region us-east-1
+aws freetier get-account-plan-state --region us-east-1
 ```
 
 ```bash
 export TRANSFEROPS_OPERATOR=you@university.edu
-./scripts/deploy-aws-student.sh      # terraform -> images -> seed -> console
+./scripts/deploy-aws-student.sh      # ECR bootstrap -> images -> app -> SSM seed
 ./scripts/setup-github-actions.sh    # CI, via OIDC, no access key
 ```
 
+Windows PowerShell uses the equivalent native workflow:
+
+```powershell
+$env:TRANSFEROPS_OPERATOR = "you@university.edu"
+.\scripts\deploy-aws-student.ps1
+```
+
 ```text
-CloudFront -> S3 (private)   the console, static, 1TB/mo free
-Lambda Function URL          FastAPI, SCALES TO ZERO, 1M req/mo free forever
-EC2 t3.micro                 Keycloak, ALWAYS WARM, 750h/mo free
-RDS db.t4g.micro             warehouse + keycloak databases
+CloudFront -> S3 (private)   HTTPS console
+Lambda Function URLs (3)    API, assistant and nightly refresh
+CloudFront -> EC2            HTTPS Keycloak, no domain required
+EC2 t3.micro                 Keycloak + NAT for private Lambda egress
+Private RDS db.t4g.micro     warehouse + Keycloak databases, no public ingress
 EventBridge -> Lambda        nightly refresh, runs for seconds
-SSM Parameter Store          secrets, free (Secrets Manager would be ~2.80/mo)
+SSM Parameter Store          secrets + constrained rollout/seed automation
 IAM OIDC -> role             GitHub Actions, no stored credential
 ```
 
-Two components run continuously; everything else scales to zero or sits in an
-always-free tier. No NAT gateway (~32 USD/mo), no ALB, no ECS, no Secrets
-Manager — each is a real production component and each is a standing charge.
+Two components run continuously. There is no NAT Gateway, ALB, custom domain,
+ECS, or EKS; the one EC2 host provides NAT for private functions. Gross-cost
+budgets exclude credits so promotional balance does not hide the burn rate.
 
 **The API runs on Lambda without a single application change.** AWS Lambda Web
 Adapter runs the same `uvicorn api.main:app` that runs locally, so
 `tests/api_checks.py` still drives the deployed contract — no Mangum, no handler.
 
-**Keycloak is better here than it was on Azure.** It is a stateful JVM that
-cannot scale to zero: on Container Apps that meant either ~34 USD/month held
-warm or a 40–60 second wait on the first sign-in. A t3.micro is free for 750
-hours a month and simply runs, always warm.
+**Keycloak uses HTTPS without a domain.** A dedicated CloudFront distribution
+terminates TLS with the AWS-owned certificate, and the origin security group
+accepts only CloudFront's managed prefix list. SMTP relay settings enable
+registration verification and password recovery mail.
 
 **CI actually deploys.** Federated login on AWS is an IAM OIDC provider and a
 role inside your own account — no directory administrator, which is exactly what
@@ -160,7 +167,8 @@ blocked the Azure attempt.
 The AI layer defaults to `TRANSFEROPS_AI_PROVIDER=mock` — no key, no credits,
 every AI surface working. Similarity and delay-risk never used a model at all.
 
-Tear it all down with `./scripts/destroy-aws-student.sh`, which also checks for
+Tear it all down with `./scripts/destroy-aws-student.sh` (or the PowerShell
+equivalent), which also checks for
 the unattached Elastic IPs and orphaned EBS volumes a `terraform destroy` leaves
 billing.
 

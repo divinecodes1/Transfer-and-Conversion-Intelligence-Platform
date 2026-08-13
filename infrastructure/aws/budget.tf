@@ -6,8 +6,7 @@
 # the only early warning there is, which is why it is provisioned with the stack
 # rather than left as a portal task nobody does.
 #
-# Two budgets are free per account, so this uses one and leaves room for a
-# second (a cumulative one -- see the note below).
+# Monthly and calendar-year views expose both a sudden spike and slower burn.
 # ============================================================================
 
 resource "aws_budgets_budget" "monthly" {
@@ -20,6 +19,10 @@ resource "aws_budgets_budget" "monthly" {
   limit_amount = tostring(var.monthly_budget_amount)
   limit_unit   = "USD"
   time_unit    = "MONTHLY"
+
+  cost_types {
+    include_credit = false
+  }
 
   # Actual thresholds. 50 and 75 are the ones that leave time to turn something
   # off; by the time 100% is actual, the money is already spent.
@@ -45,20 +48,21 @@ resource "aws_budgets_budget" "monthly" {
   }
 }
 
-# A monthly budget alarms on a bad month. It does not alarm on slow, steady
-# burn: twelve quiet months at 8 USD never trip a 30 USD monthly threshold and
-# still empty a 100 USD credit.
-#
-# This second budget is annual and does not reset, so it tracks cumulative
-# spend -- the failure mode that actually ends a student account.
+# A monthly budget alarms on a bad month. The second view is calendar-year gross
+# usage. The deployment script separately prints the authoritative remaining
+# credits and expiration date, which is the cross-year Free Plan control.
 resource "aws_budgets_budget" "annual" {
   count = length(var.budget_alert_emails) > 0 ? 1 : 0
 
   name         = "${local.name}-annual"
   budget_type  = "COST"
-  limit_amount = tostring(var.monthly_budget_amount * 4)
+  limit_amount = tostring(var.free_plan_credit_budget_amount)
   limit_unit   = "USD"
   time_unit    = "ANNUALLY"
+
+  cost_types {
+    include_credit = false
+  }
 
   dynamic "notification" {
     for_each = [50, 80, 100]

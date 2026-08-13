@@ -1,10 +1,8 @@
 # ============================================================================
 # RDS PostgreSQL.
 #
-# The one standing charge in the stack. db.t4g.micro is 750h/month free on the
-# legacy tier and roughly 12-13 USD/month otherwise, which is why every other
-# component was chosen to scale to zero or sit in an always-free tier: this is
-# the number the budget has to absorb.
+# The largest standing charge in the stack. It runs continuously and therefore
+# consumes the current credit-based Free Plan even when no user opens the demo.
 #
 # Sizing: the warehouse is ~260 projects with full schedule history, a few
 # hundred thousand rows, working set in memory. The bottleneck in this platform
@@ -17,7 +15,7 @@
 
 resource "aws_db_subnet_group" "main" {
   name       = "${local.name}-db"
-  subnet_ids = aws_subnet.public[*].id
+  subnet_ids = aws_subnet.private[*].id
 }
 
 # pgvector and forced TLS. Both are parameter-group settings, so they are part
@@ -65,9 +63,7 @@ resource "aws_db_instance" "main" {
   vpc_security_group_ids = [aws_security_group.database.id]
   parameter_group_name   = aws_db_parameter_group.main.name
 
-  # Public, because the API runs on Lambda outside the VPC. See the long comment
-  # on the database security group in network.tf, and aws/security.md.
-  publicly_accessible = true
+  publicly_accessible = false
 
   multi_az                = false
   backup_retention_period = 1 # 0 disables automated backups entirely; 1 is the floor that keeps them
@@ -106,18 +102,4 @@ locals {
   # charge to gain isolation that a separate database and separate credentials
   # already provide at this scale.
   keycloak_jdbc_url = "jdbc:postgresql://${local.db_host}:5432/keycloak?sslmode=require"
-}
-
-# The operator's own address, so `python etl/run.py` works from the laptop that
-# runs the deploy script. Separate from the open rule above so that tightening
-# that rule later does not also lock out the loader.
-resource "aws_vpc_security_group_ingress_rule" "operator_postgres" {
-  count = var.allowed_client_ip == "" ? 0 : 1
-
-  security_group_id = aws_security_group.database.id
-  description       = "Operator laptop"
-  cidr_ipv4         = var.allowed_client_ip
-  from_port         = 5432
-  to_port           = 5432
-  ip_protocol       = "tcp"
 }

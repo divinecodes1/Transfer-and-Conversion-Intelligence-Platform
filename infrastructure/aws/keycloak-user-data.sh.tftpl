@@ -1,112 +1,122 @@
 #!/bin/bash
-# Keycloak host bootstrap.
-#
-# Runs once at first boot. Everything it needs -- the image, the realm, the
-# themes -- is in the container; this script only supplies configuration and
-# keeps the container running across reboots.
-#
-# Secrets are read from SSM Parameter Store using the instance role, never
-# baked into user data. User data is readable by anything that can reach the
-# instance metadata service, so a password written here would be a password
-# published to every process on the host.
 set -euxo pipefail
 
 dnf update -y
-dnf install -y docker awscli
+dnf install -y docker awscli iptables-services postgresql16 || dnf install -y docker awscli iptables-services postgresql15
 systemctl enable --now docker
 
-# Log in to ECR with the instance role. No stored registry credential.
-aws ecr get-login-password --region ${region} \
-  | docker login --username AWS --password-stdin ${registry}
+# Low-cost NAT instance for the private Lambda subnets. source_dest_check is
+# disabled in Terraform; these rules provide forwarding without a NAT Gateway.
+cat >/etc/sysctl.d/99-transferops-nat.conf <<'SYSCTL'
+net.ipv4.ip_forward = 1
+SYSCTL
+sysctl --system
+PRIMARY_IF="$(ip route show default | awk '{print $5; exit}')"
+iptables -t nat -C POSTROUTING -o "$PRIMARY_IF" -j MASQUERADE 2>/dev/null || \
+  iptables -t nat -A POSTROUTING -o "$PRIMARY_IF" -j MASQUERADE
+service iptables save
+systemctl enable iptables
 
+mkdir -p /etc/transferops
+chmod 700 /etc/transferops
+
+DB_PASSWORD="$(aws ssm get-parameter --region ${region} --name '${parameter_path}/db-master-password' --with-decryption --query Parameter.Value --output text)"
+ADMIN_PASSWORD="$(aws ssm get-parameter --region ${region} --name '${parameter_path}/keycloak-admin-password' --with-decryption --query Parameter.Value --output text)"
+SMTP_PASSWORD=""
+if aws ssm get-parameter --region ${region} --name '${parameter_path}/smtp-password' >/dev/null 2>&1; then
+  SMTP_PASSWORD="$(aws ssm get-parameter --region ${region} --name '${parameter_path}/smtp-password' --with-decryption --query Parameter.Value --output text)"
+fi
+
+cat >/etc/transferops/keycloak.env <<ENV
+KC_DB=postgres
+KC_DB_URL=${jdbc_url}
+KC_DB_USERNAME=${db_username}
+KC_DB_PASSWORD=$DB_PASSWORD
+KC_BOOTSTRAP_ADMIN_USERNAME=${admin_username}
+KC_BOOTSTRAP_ADMIN_PASSWORD=$ADMIN_PASSWORD
+KC_HOSTNAME=https://pending.invalid
+KC_HOSTNAME_STRICT=true
+KC_HTTP_ENABLED=true
+KC_HEALTH_ENABLED=true
+TRANSFEROPS_WEB_ORIGIN=${web_origin}
+KEYCLOAK_SMTP_HOST=${smtp_host}
+KEYCLOAK_SMTP_PORT=${smtp_port}
+KEYCLOAK_SMTP_FROM=${smtp_from}
+KEYCLOAK_SMTP_REPLY_TO=${smtp_reply_to}
+KEYCLOAK_SMTP_USER=${smtp_username}
+KEYCLOAK_SMTP_PASSWORD=
+KEYCLOAK_SMTP_AUTH=${smtp_auth}
+KEYCLOAK_SMTP_SSL=${smtp_ssl}
+KEYCLOAK_SMTP_STARTTLS=${smtp_starttls}
+ENV
+chmod 600 /etc/transferops/keycloak.env
+printf 'KEYCLOAK_SMTP_PASSWORD=%s\n' "$SMTP_PASSWORD" >/etc/transferops/keycloak-secret.env
+chmod 600 /etc/transferops/keycloak-secret.env
+printf 'KEYCLOAK_IMAGE=%s\n' '${image}' >/etc/transferops/keycloak-image.env
+
+aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${registry}
 docker pull ${image}
 
-# Fetch configuration from SSM. --with-decryption resolves the SecureStrings.
-DB_PASSWORD="$(aws ssm get-parameter --region ${region} \
-  --name "${parameter_path}/db-master-password" --with-decryption \
-  --query Parameter.Value --output text)"
-ADMIN_PASSWORD="$(aws ssm get-parameter --region ${region} \
-  --name "${parameter_path}/keycloak-admin-password" --with-decryption \
-  --query Parameter.Value --output text)"
+DB_HOST="$(echo '${jdbc_url}' | sed -E 's#jdbc:postgresql://([^:/]+).*#\1#')"
+export PGPASSWORD="$DB_PASSWORD"
+ADMIN_URI="postgresql://${db_username}@$DB_HOST:5432/transferops?sslmode=require"
+for attempt in $(seq 1 60); do
+  psql "$ADMIN_URI" -tAc 'SELECT 1' >/dev/null 2>&1 && break
+  sleep 10
+done
+if ! psql "$ADMIN_URI" -tAc "SELECT 1 FROM pg_database WHERE datname='keycloak'" | grep -q 1; then
+  psql "$ADMIN_URI" -c 'CREATE DATABASE keycloak'
+fi
 
-# A systemd unit rather than `docker run` in user data: user data runs once, and
-# an instance that reboots without restarting Keycloak is an instance that looks
-# healthy and authenticates nobody.
-cat >/etc/systemd/system/keycloak.service <<UNIT
+cat >/usr/local/bin/transferops-keycloak-configure <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+set -a
+. /etc/transferops/keycloak.env
+. /etc/transferops/keycloak-secret.env
+set +a
+for attempt in $(seq 1 90); do
+  curl -fsS http://127.0.0.1:9000/health/ready >/dev/null && break
+  sleep 5
+done
+curl -fsS http://127.0.0.1:9000/health/ready >/dev/null
+docker exec keycloak /opt/keycloak/bin/kcadm.sh config credentials \
+  --server http://127.0.0.1:8080 --realm master \
+  --user "$KC_BOOTSTRAP_ADMIN_USERNAME" --password "$KC_BOOTSTRAP_ADMIN_PASSWORD"
+if [ -n "$KEYCLOAK_SMTP_HOST" ]; then
+  docker exec keycloak /opt/keycloak/bin/kcadm.sh update realms/transferops \
+    -s "smtpServer.host=$KEYCLOAK_SMTP_HOST" \
+    -s "smtpServer.port=$KEYCLOAK_SMTP_PORT" \
+    -s "smtpServer.from=$KEYCLOAK_SMTP_FROM" \
+    -s "smtpServer.replyTo=$KEYCLOAK_SMTP_REPLY_TO" \
+    -s "smtpServer.user=$KEYCLOAK_SMTP_USER" \
+    -s "smtpServer.password=$KEYCLOAK_SMTP_PASSWORD" \
+    -s "smtpServer.auth=$KEYCLOAK_SMTP_AUTH" \
+    -s "smtpServer.ssl=$KEYCLOAK_SMTP_SSL" \
+    -s "smtpServer.starttls=$KEYCLOAK_SMTP_STARTTLS"
+fi
+SCRIPT
+chmod 700 /usr/local/bin/transferops-keycloak-configure
+
+cat >/etc/systemd/system/keycloak.service <<'UNIT'
 [Unit]
-Description=Keycloak
-After=docker.service
+Description=Transfer Intelligence Keycloak
+After=docker.service network-online.target
 Requires=docker.service
 
 [Service]
+EnvironmentFile=/etc/transferops/keycloak-image.env
 Restart=always
 RestartSec=10
-TimeoutStartSec=300
+TimeoutStartSec=600
 ExecStartPre=-/usr/bin/docker rm -f keycloak
-ExecStart=/usr/bin/docker run --rm --name keycloak \
-  -p 8080:8080 \
-  -e KC_DB=postgres \
-  -e KC_DB_URL='${jdbc_url}' \
-  -e KC_DB_USERNAME='${db_username}' \
-  -e KC_DB_PASSWORD='$DB_PASSWORD' \
-  -e KC_BOOTSTRAP_ADMIN_USERNAME='${admin_username}' \
-  -e KC_BOOTSTRAP_ADMIN_PASSWORD='$ADMIN_PASSWORD' \
-  -e KC_HOSTNAME_STRICT=false \
-  -e KC_HTTP_ENABLED=true \
-  -e KC_HEALTH_ENABLED=true \
-  -e KC_PROXY_HEADERS=xforwarded \
-  -e TRANSFEROPS_WEB_ORIGIN='${web_origin}' \
-  -e KEYCLOAK_SMTP_HOST='' \
-  -e KEYCLOAK_SMTP_PORT='587' \
-  -e KEYCLOAK_SMTP_FROM='no-reply@transferops.local' \
-  -e KEYCLOAK_SMTP_REPLY_TO='no-reply@transferops.local' \
-  -e KEYCLOAK_SMTP_USER='' \
-  -e KEYCLOAK_SMTP_PASSWORD='' \
-  -e KEYCLOAK_SMTP_AUTH='false' \
-  -e KEYCLOAK_SMTP_SSL='false' \
-  -e KEYCLOAK_SMTP_STARTTLS='false' \
-  ${image}
+ExecStart=/usr/bin/docker run --rm --name keycloak -p 8080:8080 -p 127.0.0.1:9000:9000 --env-file /etc/transferops/keycloak.env --env-file /etc/transferops/keycloak-secret.env $KEYCLOAK_IMAGE
+ExecStartPost=/usr/local/bin/transferops-keycloak-configure
 ExecStop=/usr/bin/docker stop keycloak
 
 [Install]
 WantedBy=multi-user.target
 UNIT
-
-# The realm's smtpServer block is written with placeholders and realm import
-# fails outright if they do not resolve -- hence every KEYCLOAK_SMTP_* above,
-# even though there is no relay. The honest consequence: Keycloak cannot send a
-# verification message, so SELF-REGISTRATION DOES NOT COMPLETE. The deploy
-# script grants the operator directly in tr_gov instead.
-
-# ---- Keycloak's database, BEFORE Keycloak starts ---------------------------
-#
-# Keycloak gets its own database on the shared instance and will not create it
-# itself. This runs first on purpose: `Restart=always` would eventually paper
-# over the wrong order, but the instance would spend its first minutes in a
-# crash loop and the logs would blame the database rather than the sequence.
-#
-# The loop is for RDS, not for the SQL: the instance can finish booting before
-# the database finishes becoming available.
-dnf install -y postgresql16 || dnf install -y postgresql15
-
-DB_HOST="$(echo '${jdbc_url}' | sed -E 's#jdbc:postgresql://([^:/]+).*#\1#')"
-export PGPASSWORD="$DB_PASSWORD"
-ADMIN_URI="postgresql://${db_username}@$DB_HOST:5432/transferops?sslmode=require"
-
-for attempt in $(seq 1 60); do
-  if psql "$ADMIN_URI" -tAc "SELECT 1" >/dev/null 2>&1; then
-    echo "database reachable after $attempt attempt(s)"
-    break
-  fi
-  sleep 10
-done
-
-# CREATE DATABASE cannot run inside a transaction and has no IF NOT EXISTS, so
-# it is guarded by a lookup rather than by swallowing the error -- a swallowed
-# error here would hide a genuine connection failure.
-if ! psql "$ADMIN_URI" -tAc "SELECT 1 FROM pg_database WHERE datname='keycloak'" | grep -q 1; then
-  psql "$ADMIN_URI" -c "CREATE DATABASE keycloak"
-fi
 
 systemctl daemon-reload
 systemctl enable --now keycloak

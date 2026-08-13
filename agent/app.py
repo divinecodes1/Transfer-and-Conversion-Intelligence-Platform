@@ -63,8 +63,25 @@ class ApiClient:
         r.raise_for_status()
         return r.json()
 
+    def post(self, path, payload):
+        headers = {"Authorization": self.authorization} if self.authorization else {}
+        r = self._client.post(path, json=payload, headers=headers)
+        r.raise_for_status()
+        return r.json() if r.content else None
+
     def catalogue(self):
         return self.get("/catalogue")["metrics"]
+
+
+def _record(api, event):
+    """Persist through the governed API when the assistant is remote."""
+    if getattr(api, "authorization", None) and hasattr(api, "post"):
+        try:
+            api.post("/assistant/audit", {"event": event})
+            return
+        except Exception:
+            pass
+    audit.record(event)
 
 
 class Question(BaseModel):
@@ -165,7 +182,7 @@ def _llm_answer(question, api, identity, started, fallback_from=None):
             tool=call.get("tool", "unknown"),
             outcome="empty" if not call.get("rows") else "ok").inc()
 
-    audit.record({
+    _record(api, {
         "asked_at": datetime.now(timezone.utc).isoformat(),
         "identity": identity,
         "question": question,
@@ -266,7 +283,7 @@ def answer(question, api=None, identity=None, retrieve=True, mode="deterministic
         telemetry.AGENT_TOOL_CALLS.labels(
             tool=tool, outcome="ok" if payload is not None else "empty").inc()
 
-    audit.record({
+    _record(api, {
         "asked_at": datetime.now(timezone.utc).isoformat(),
         "identity": identity,
         "question": question,
@@ -323,10 +340,9 @@ def audit_trail(request: Request, limit: int = 50):
     authorization = request.headers.get("authorization")
     if not authorization:
         raise HTTPException(status_code=401, detail="missing bearer token")
-    # The API validates the signature, expiry and entitlement before any audit
-    # data leaves this service.
-    ApiClient(authorization=authorization).get("/whoami")
-    return {"calls": audit.recent(limit), **audit.status()}
+    # The API validates the signature and derives the identity; it returns only
+    # that caller's persisted traces.
+    return ApiClient(authorization=authorization).get("/assistant/audit", limit=limit)
 
 
 @app.get("/observability/metrics", tags=["service"], include_in_schema=False)

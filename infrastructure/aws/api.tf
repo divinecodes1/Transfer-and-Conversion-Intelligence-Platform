@@ -2,9 +2,8 @@
 # The API, on Lambda.
 #
 # This is what makes the deployment nearly free. Lambda scales to zero properly
-# -- not "one small instance", actually zero -- and the first million requests a
-# month are free forever, not for twelve months. A demo nobody is hitting costs
-# nothing at all, and the architecture does not pretend otherwise.
+# -- not "one small instance", actually zero. A demo nobody is hitting has no
+# Lambda compute duration, while requests still count against the current plan.
 #
 # The application does not know. AWS Lambda Web Adapter (see
 # infrastructure/docker/lambda/Dockerfile) runs the same `uvicorn api.main:app`
@@ -48,6 +47,11 @@ resource "aws_iam_role_policy_attachment" "api_logs" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+resource "aws_iam_role_policy_attachment" "api_vpc" {
+  role       = aws_iam_role.api.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
 # Blob storage for generated reports and knowledge documents, scoped to the one
 # bucket. Read and write, nothing else, nowhere else.
 data "aws_iam_policy_document" "api_documents" {
@@ -85,7 +89,8 @@ locals {
       TRANSFEROPS_AI_PROVIDER      = var.ai_provider
       TRANSFEROPS_AI_DAILY_CAP     = tostring(var.ai_daily_request_cap)
       TRANSFEROPS_WEB_ORIGIN       = "https://${aws_cloudfront_distribution.console.domain_name}"
-      KEYCLOAK_URL                 = "http://${aws_eip.keycloak.public_ip}:8080"
+      KEYCLOAK_URL                 = "https://${aws_cloudfront_distribution.keycloak.domain_name}"
+      KEYCLOAK_JWKS_URL            = "http://${aws_instance.keycloak.private_ip}:8080"
       KEYCLOAK_REALM               = var.keycloak_realm
       KEYCLOAK_AUDIENCE            = var.keycloak_audience
       TRANSFEROPS_DOCUMENTS_BUCKET = aws_s3_bucket.documents.id
@@ -100,7 +105,7 @@ resource "aws_lambda_function" "api" {
   function_name = "${local.name}-api"
   role          = aws_iam_role.api.arn
   package_type  = "Image"
-  image_uri     = "${aws_ecr_repository.api.repository_url}:${var.api_image_tag}"
+  image_uri     = "${data.aws_ecr_repository.api.repository_url}:${var.api_image_tag}"
 
   memory_size = var.api_memory_mb
   timeout     = var.api_timeout_seconds
@@ -112,15 +117,73 @@ resource "aws_lambda_function" "api" {
     variables = local.app_environment
   }
 
+  vpc_config {
+    subnet_ids         = aws_subnet.private[*].id
+    security_group_ids = [aws_security_group.lambda.id]
+  }
+
   depends_on = [
     aws_iam_role_policy_attachment.api_logs,
+    aws_iam_role_policy_attachment.api_vpc,
     aws_cloudwatch_log_group.api,
+    aws_route.private_egress,
   ]
 
   lifecycle {
     # CI updates the image out of band. Without this, the next `terraform apply`
     # would propose rolling production back to whatever tag the tfvars names.
     ignore_changes = [image_uri]
+  }
+}
+
+# The assistant uses the same tested image with a different ASGI command. It is
+# intentionally outside the VPC: it reaches the governed API over HTTPS and is
+# never given a warehouse credential.
+resource "aws_cloudwatch_log_group" "assistant" {
+  name              = "/aws/lambda/${local.name}-assistant"
+  retention_in_days = var.log_retention_days
+}
+
+resource "aws_lambda_function" "assistant" {
+  function_name = "${local.name}-assistant"
+  role          = aws_iam_role.api.arn
+  package_type  = "Image"
+  image_uri     = "${data.aws_ecr_repository.api.repository_url}:${var.api_image_tag}"
+  memory_size   = 1024
+  timeout       = 60
+  architectures = ["x86_64"]
+
+  image_config {
+    command = ["uvicorn", "agent.app:app", "--host", "0.0.0.0", "--port", "8100", "--workers", "1"]
+  }
+
+  environment {
+    variables = merge({
+      APP_ENV                      = var.environment
+      AWS_LWA_PORT                 = "8100"
+      AWS_LWA_READINESS_CHECK_PATH = "/healthz"
+      TRANSFEROPS_API              = aws_lambda_function_url.api.function_url
+      TRANSFEROPS_WEB_ORIGIN       = "https://${aws_cloudfront_distribution.console.domain_name}"
+      TRANSFEROPS_AI_PROVIDER      = var.ai_provider
+      TRANSFEROPS_AI_DAILY_CAP     = tostring(var.ai_daily_request_cap)
+      },
+      var.ai_model != "" ? { TRANSFEROPS_AI_MODEL = var.ai_model } : {},
+      var.ai_base_url != "" ? { TRANSFEROPS_AI_BASE_URL = var.ai_base_url } : {},
+    var.ai_api_key != "" ? { TRANSFEROPS_AI_API_KEY = var.ai_api_key } : {})
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.api_logs, aws_cloudwatch_log_group.assistant]
+  lifecycle { ignore_changes = [image_uri] }
+}
+
+resource "aws_lambda_function_url" "assistant" {
+  function_name      = aws_lambda_function.assistant.function_name
+  authorization_type = "NONE"
+  cors {
+    allow_origins = ["https://${aws_cloudfront_distribution.console.domain_name}"]
+    allow_methods = ["GET", "POST"]
+    allow_headers = ["authorization", "content-type", "x-request-id"]
+    max_age       = 3600
   }
 }
 
@@ -156,7 +219,7 @@ resource "aws_lambda_function" "refresh" {
   function_name = "${local.name}-refresh"
   role          = aws_iam_role.api.arn
   package_type  = "Image"
-  image_uri     = "${aws_ecr_repository.api.repository_url}:${var.api_image_tag}"
+  image_uri     = "${data.aws_ecr_repository.api.repository_url}:${var.api_image_tag}"
 
   memory_size   = 512
   timeout       = 300
@@ -173,7 +236,12 @@ resource "aws_lambda_function" "refresh" {
     variables = local.app_environment
   }
 
-  depends_on = [aws_cloudwatch_log_group.refresh]
+  vpc_config {
+    subnet_ids         = aws_subnet.private[*].id
+    security_group_ids = [aws_security_group.lambda.id]
+  }
+
+  depends_on = [aws_cloudwatch_log_group.refresh, aws_iam_role_policy_attachment.api_vpc, aws_route.private_egress]
 
   lifecycle {
     ignore_changes = [image_uri]
