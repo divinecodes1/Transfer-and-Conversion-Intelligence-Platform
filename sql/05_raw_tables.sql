@@ -35,6 +35,11 @@ CREATE TABLE tr_raw.raw_project (
     source_site      VARCHAR,
     target_site      VARCHAR,
     portfolio        VARCHAR,
+    -- What is being moved, and who buys it. RAW lands them as delivered; the
+    -- mapping to dim_product_line / dim_application is a CORE concern, so an
+    -- unrecognised code is a fact about the source here rather than a reject.
+    product_line        VARCHAR,
+    application_segment VARCHAR,
     status           VARCHAR,
     actual_start     VARCHAR,
     actual_finish    VARCHAR

@@ -37,7 +37,8 @@ DROP VIEW IF EXISTS tr_stg.stg_snapshot;
 
 CREATE VIEW tr_stg.stg_project AS
 SELECT project_key, project_id, project_name, transfer_type, complexity_class,
-       source_site, target_site, portfolio, status, actual_start, actual_finish,
+       source_site, target_site, portfolio, product_line, application_segment,
+       status, actual_start, actual_finish,
        batch_id, record_hash
 FROM (
     SELECT
@@ -49,6 +50,8 @@ FROM (
         TRIM(source_site)                                  AS source_site,
         TRIM(target_site)                                  AS target_site,
         UPPER(TRIM(portfolio))                             AS portfolio,
+        UPPER(TRIM(product_line))                          AS product_line,
+        UPPER(TRIM(application_segment))                   AS application_segment,
         UPPER(TRIM(status))                                AS status,
         tr_stg.to_date_safe(actual_start)                  AS actual_start,
         tr_stg.to_date_safe(actual_finish)                 AS actual_finish,

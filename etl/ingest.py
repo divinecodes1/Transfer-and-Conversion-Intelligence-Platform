@@ -134,7 +134,8 @@ def promote(con, rejected=()):
     con.execute(f"""
         INSERT INTO tr_core.dim_project
         SELECT project_key, project_id, project_name, transfer_type,
-               complexity_class, source_site, target_site, portfolio, status,
+               complexity_class, source_site, target_site, portfolio,
+               product_line, application_segment, status,
                actual_start, actual_finish
         FROM tr_stg.stg_project
         WHERE status IN ('COMPLETED', 'ACTIVE', 'PLANNED', 'CANCELLED')
