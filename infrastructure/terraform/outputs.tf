@@ -12,7 +12,8 @@ output "resource_group" {
 }
 
 output "location" {
-  value = module.resource_group.location
+  description = "Azure region used by workload resources. The resource-group metadata location can differ."
+  value       = var.location
 }
 
 output "api_url" {

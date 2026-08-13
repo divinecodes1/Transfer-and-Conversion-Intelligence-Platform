@@ -6,7 +6,10 @@
       "Bash(grep -oE \"'[A-Z_]{6,}'\" sql/02_governance.sql)",
       "Bash(grep -n \"to=\\\\\"/\\\\|label:\\\\|icon:\\\\|NAV\\\\|adminOnly\" web/src/components/shell.tsx)",
       "Bash(gh run *)",
-      "Bash(bash -n scripts/setup-github-actions.sh)"
+      "Bash(bash -n scripts/setup-github-actions.sh)",
+      "Bash(bash scripts/setup-github-actions.sh)",
+      "Bash(az ad *)",
+      "Bash(az rest *)"
     ]
   }
 }

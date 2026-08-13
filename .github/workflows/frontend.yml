@@ -76,8 +76,10 @@ jobs:
 
   deploy:
     needs: build
-    # Pull requests build and gate but do not publish.
-    if: github.event_name != 'pull_request'
+    # Pull requests build and gate but do not publish. AZURE_DEPLOY_ENABLED is
+    # false when the tenant forbids the app registration CI would sign in with --
+    # publish from your machine instead: ./scripts/roll-deployment.sh
+    if: vars.AZURE_DEPLOY_ENABLED == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production-demo
     permissions:

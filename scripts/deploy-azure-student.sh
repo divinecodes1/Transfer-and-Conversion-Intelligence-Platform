@@ -103,7 +103,12 @@ if [[ -z "${TF_VAR_budget_alert_emails:-}" ]]; then
   if ! grep -qE '^\s*budget_alert_emails\s*=\s*\[\s*"' "${TF_DIR}/terraform.tfvars" 2>/dev/null; then
     warn "No budget alert address is configured."
     warn "Without one, NO budget is created and nothing warns you before the credit runs out."
-    read -r -p "  Email for budget alerts (blank to deploy without a budget): " budget_email
+    # `|| true` so a non-interactive run falls through to "no budget" with a
+    # warning instead of aborting the deploy on EOF. The *confirmation* prompts
+    # elsewhere in these scripts deliberately do NOT do this: there, exiting on
+    # EOF is the correct answer, because an unanswered "are you sure?" must
+    # never be read as yes.
+    read -r -p "  Email for budget alerts (blank to deploy without a budget): " budget_email || true
     if [[ -n "${budget_email}" ]]; then
       export TF_VAR_budget_alert_emails="[\"${budget_email}\"]"
       info "Alerts at 50/75/90/100% will go to ${budget_email}."

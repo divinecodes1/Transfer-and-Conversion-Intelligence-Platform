@@ -85,22 +85,63 @@ step "Entra app registration for CI"
 APP_NAME="transfer-intelligence-ci"
 CLIENT_ID="$(az ad app list --display-name "${APP_NAME}" --query "[0].appId" -o tsv 2>/dev/null || true)"
 
-if [[ -z "${CLIENT_ID}" ]]; then
-  info "Creating ${APP_NAME}"
-  CLIENT_ID="$(az ad app create --display-name "${APP_NAME}" --query appId -o tsv)"
+# Managed tenants -- universities especially -- commonly set
+# allowedToCreateApps=false, which blocks every non-admin from registering an
+# application. Checked up front because the alternative is a raw Graph
+# "Insufficient privileges" error two steps later, after roles have been
+# touched, with nothing explaining that ARM rights and DIRECTORY rights are
+# different things. You can own an entire subscription and still not be allowed
+# to create an identity in the directory behind it.
+CAN_CREATE_APPS="$(az rest --method GET \
+  --url "https://graph.microsoft.com/v1.0/policies/authorizationPolicy" \
+  --query "defaultUserRolePermissions.allowedToCreateApps" -o tsv 2>/dev/null || echo "unknown")"
+
+if [[ -z "${CLIENT_ID}" && "${CAN_CREATE_APPS}" == "false" ]]; then
+  printf '\n'
+  warn "This tenant does not permit you to register applications."
+  warn "  tenant policy allowedToCreateApps = false"
+  warn "  directory roles held             = none"
+  printf '\n'
+  info "Federated OIDC login from GitHub Actions needs a service principal, and"
+  info "a service principal needs an app registration. Without one, the deploy"
+  info "jobs cannot authenticate to Azure -- no workaround exists on the runner."
+  printf '\n'
+  info "What still works, and it is most of the value:"
+  info "  - CI runs every test gate on each push"
+  info "  - CI builds and publishes both images to GHCR (uses GITHUB_TOKEN,"
+  info "    which needs no Azure identity at all)"
+  info "  - you roll the deployment from this machine, where your own az login"
+  info "    already has the ARM rights:  ./scripts/roll-deployment.sh"
+  printf '\n'
+  info "To enable CI deployment instead, ask your tenant administrator to either"
+  info "set 'Users can register applications' to Yes, or create the app"
+  info "registration and a federated credential for:"
+  info "  repo:${GH_REPO}:environment:production-demo"
+  printf '\n'
+
+  AZURE_IDENTITY_AVAILABLE=false
 else
-  info "Reusing ${APP_NAME} (${CLIENT_ID})"
+  AZURE_IDENTITY_AVAILABLE=true
+  if [[ -z "${CLIENT_ID}" ]]; then
+    info "Creating ${APP_NAME}"
+    CLIENT_ID="$(az ad app create --display-name "${APP_NAME}" --query appId -o tsv)"
+  else
+    info "Reusing ${APP_NAME} (${CLIENT_ID})"
+  fi
 fi
 
-# The service principal is the object role assignments actually attach to; the
-# app registration on its own cannot be granted anything.
-if ! az ad sp show --id "${CLIENT_ID}" >/dev/null 2>&1; then
-  info "Creating service principal"
-  az ad sp create --id "${CLIENT_ID}" >/dev/null
+if $AZURE_IDENTITY_AVAILABLE; then
+  # The service principal is the object role assignments actually attach to; the
+  # app registration on its own cannot be granted anything.
+  if ! az ad sp show --id "${CLIENT_ID}" >/dev/null 2>&1; then
+    info "Creating service principal"
+    az ad sp create --id "${CLIENT_ID}" >/dev/null
+  fi
+  SP_OBJECT_ID="$(az ad sp show --id "${CLIENT_ID}" --query id -o tsv)"
 fi
-SP_OBJECT_ID="$(az ad sp show --id "${CLIENT_ID}" --query id -o tsv)"
 
 # ---- 4. Federated credentials ----------------------------------------------
+if $AZURE_IDENTITY_AVAILABLE; then
 step "Federated credentials (no client secret)"
 
 # One subject per context that needs to authenticate. The subject is matched
@@ -168,6 +209,8 @@ if $WITH_TERRAFORM; then
   assign "Role Based Access Control Administrator" "${RG_SCOPE}"
 fi
 
+fi  # AZURE_IDENTITY_AVAILABLE
+
 # ---- 6. GitHub secrets ------------------------------------------------------
 step "GitHub secrets"
 
@@ -181,9 +224,16 @@ set_secret() {
   info "set     ${name}"
 }
 
-set_secret AZURE_CLIENT_ID       "${CLIENT_ID}"
-set_secret AZURE_TENANT_ID       "${TENANT_ID}"
-set_secret AZURE_SUBSCRIPTION_ID "${SUBSCRIPTION_ID}"
+if $AZURE_IDENTITY_AVAILABLE; then
+  set_secret AZURE_CLIENT_ID       "${CLIENT_ID}"
+  set_secret AZURE_TENANT_ID       "${TENANT_ID}"
+  set_secret AZURE_SUBSCRIPTION_ID "${SUBSCRIPTION_ID}"
+else
+  info "Skipping the Azure login secrets -- there is no identity to log in as."
+fi
+
+# Set regardless: harmless without an identity, and already correct if a tenant
+# administrator enables app registration later.
 set_secret AZURE_RESOURCE_GROUP  "${RESOURCE_GROUP}"
 set_secret AZURE_CONTAINER_APP   "${CONTAINER_APP}"
 set_secret AZURE_KEYCLOAK_APP    "${KEYCLOAK_APP}"
@@ -200,7 +250,10 @@ if [[ -n "${TRANSFEROPS_AI_API_KEY:-}" ]]; then
 else
   info "Leave blank to keep the deployment on TRANSFEROPS_AI_PROVIDER=mock,"
   info "which needs no key and keeps every AI surface working."
-  read -r -s -p "  API key (input hidden, Enter to skip): " ai_key
+  # `|| true` is load-bearing under `set -e`: with no TTY (CI, a piped shell)
+  # read hits EOF and returns non-zero, which would abort the whole script at
+  # the last step -- after the app registration and roles were already created.
+  read -r -s -p "  API key (input hidden, Enter to skip): " ai_key || true
   printf '\n'
   if [[ -n "${ai_key}" ]]; then
     set_secret TRANSFEROPS_AI_API_KEY "${ai_key}"
@@ -237,10 +290,18 @@ set_var VITE_TRANSFEROPS_AUTH   "oidc"
 BUDGET_EMAIL="$(grep -oE '"[^"]+@[^"]+"' "${TF_DIR}/terraform.tfvars" 2>/dev/null | head -1 | tr -d '"' || true)"
 set_var BUDGET_ALERT_EMAIL "${BUDGET_EMAIL}"
 
+# The switch the deploy jobs read. A repository VARIABLE rather than a secret,
+# because job-level `if:` conditions cannot see the secrets context -- so a
+# secret could not gate a job even though that is what it looks like it should
+# do. False here means CI still tests and publishes images; only the Azure
+# rollout is skipped.
+set_var AZURE_DEPLOY_ENABLED "$($AZURE_IDENTITY_AVAILABLE && echo true || echo false)"
+
 # ---- 9. Summary -------------------------------------------------------------
 step "Done"
 
-cat <<SUMMARY
+if $AZURE_IDENTITY_AVAILABLE; then
+  cat <<SUMMARY
 
   CI signs in as    ${APP_NAME}
   Client id         ${CLIENT_ID}
@@ -251,16 +312,35 @@ cat <<SUMMARY
     gh secret list --repo ${GH_REPO}
     gh variable list --repo ${GH_REPO}
 
-  Create the environment the deploy jobs declare, if it does not exist:
-    GitHub -> Settings -> Environments -> New environment -> production-demo
-
-  Then push, or run a workflow by hand:
+  Push, or run a workflow by hand:
     gh workflow run backend.yml
     gh workflow run frontend.yml
 
 SUMMARY
 
-if ! $WITH_TERRAFORM; then
-  warn "CI cannot run 'terraform apply' -- Contributor cannot create role"
-  warn "assignments. Apply from your laptop, or re-run with --with-terraform."
+  if ! $WITH_TERRAFORM; then
+    warn "CI cannot run 'terraform apply' -- Contributor cannot create role"
+    warn "assignments. Apply from your laptop, or re-run with --with-terraform."
+  fi
+else
+  cat <<SUMMARY
+
+  CI deployment      DISABLED (AZURE_DEPLOY_ENABLED=false)
+                     the tenant does not permit the app registration it
+                     would need to sign in with
+
+  CI still does      run every test gate on each push
+                     build and publish both images to GHCR
+
+  You deploy with    ./scripts/roll-deployment.sh
+                     using your own az login, which already has the rights
+
+  Verify:
+    gh secret list --repo ${GH_REPO}
+    gh variable list --repo ${GH_REPO}
+
+  If an administrator later enables app registration, re-run this script and
+  it will create the identity and flip AZURE_DEPLOY_ENABLED to true.
+
+SUMMARY
 fi
