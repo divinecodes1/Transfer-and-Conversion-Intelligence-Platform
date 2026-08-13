@@ -26,6 +26,20 @@ on:
         description: "Deploy after building"
         type: boolean
         default: true
+      seed_warehouse:
+        description: "Reload the deployed warehouse (drops entitlements granted since the last load)"
+        type: boolean
+        default: false
+  # Called by deploy.yml, which runs this and then the console in one ordered
+  # run. The inputs are the same ones workflow_dispatch offers.
+  workflow_call:
+    inputs:
+      deploy:
+        type: boolean
+        default: true
+      seed_warehouse:
+        type: boolean
+        default: false
 
 concurrency:
   group: backend-${{ github.ref }}
@@ -85,7 +99,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: production-demo
     steps:
+      # Full history, because the warehouse-load decision below compares this
+      # commit against the previous one. A shallow clone has no such base.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # No access key. The role's trust policy accepts only a token whose
       # subject matches this repository and the production-demo environment.

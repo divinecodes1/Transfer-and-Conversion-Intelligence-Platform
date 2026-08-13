@@ -55,7 +55,13 @@ web/dist/
 
 # Local tooling state
 .streamlit/
-.claude/settings.local.json
+# Local AI-assistant configuration and generated metadata. These files are
+# workstation-specific and must never be published with the application.
+.claude/
+.codex/
+.agents/
+CLAUDE.md
+AGENTS.md
 .runtime/
 
 # NOT ignored, deliberately: sql/, docs/, observability/grafana/, keycloak/.

@@ -152,18 +152,30 @@ data "aws_iam_policy_document" "github_deploy" {
     resources = [aws_cloudfront_distribution.console.arn]
   }
 
+  # Two fixed documents and one instance. CI may run exactly these two scripted
+  # operations on exactly this host -- it cannot run arbitrary shell commands,
+  # because ssm:SendCommand is resource-scoped to the documents themselves and
+  # AWS-Runshellscript is not among them.
+  #
+  # The seed document is what makes the pipeline end to end. RDS has no public
+  # address, so a runner cannot reach it; without this, a change to sql/ would
+  # ship an image that queries columns the deployed warehouse does not have.
   statement {
-    sid     = "KeycloakRollout"
+    sid     = "RunApprovedDocuments"
     actions = ["ssm:SendCommand"]
     resources = [
       aws_ssm_document.keycloak_rollout.arn,
+      aws_ssm_document.warehouse_seed.arn,
       aws_instance.keycloak.arn,
     ]
   }
 
+  # Command invocations are identified by a command id that does not exist until
+  # send-command returns, so this cannot be scoped to a resource ARN in advance.
+  # It is read-only status for a command CI just issued.
   statement {
-    sid       = "KeycloakRolloutStatus"
-    actions   = ["ssm:GetCommandInvocation"]
+    sid       = "ReadCommandStatus"
+    actions   = ["ssm:GetCommandInvocation", "ssm:ListCommandInvocations"]
     resources = ["*"]
   }
 }
