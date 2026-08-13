@@ -1,59 +1,43 @@
 # Cost Controls — Operator Guide
 
-Practical guide to keeping the Azure demo inside a $100 student credit. The
-reasoning behind the design is in
-[azure/cost-strategy.md](../azure/cost-strategy.md); this is what to *do*.
+Practical guide to keeping the AWS demo near zero. The reasoning is in
+[aws/cost-strategy.md](../aws/cost-strategy.md); this is what to *do*.
 
 ---
 
 ## Do these first
 
-### 1. Set the budget
+### 1. Find out which free tier you have
 
-Without `budget_alert_emails`, no budget is created at all — an alert with
-nowhere to go is a row in a portal nobody opens.
+The single biggest cost fact, and it is not obvious in the console:
+
+```bash
+aws freetier get-free-tier-usage --region us-east-1
+```
+
+| Result | Meaning |
+|---|---|
+| Usage records returned | **Legacy 12-month tier** — RDS and EC2 free for 750h/month. This stack costs ~$0. |
+| Empty / not available | Likely the **credit-based tier** — no free service hours. Expect ~$20/month. |
+
+### 2. Set the budget
+
+Skipped entirely when `budget_alert_emails` is empty, and **AWS never stops
+spending on its own**:
 
 ```hcl
 monthly_budget_amount = 30
-budget_time_grain     = "Monthly"
 budget_alert_emails   = ["you@university.edu"]
 ```
 
-Alerts fire at 50%, 75%, 90% and 100% of the amount — so a budget of 30 warns at
-**15, 22.50, 27 and 30** — plus one **forecast** alert, the only one that
-arrives before the money is spent.
+You get two budgets — monthly (a bad month) and annual (slow burn). The second
+matters: twelve quiet months at $8 never trip a $30 *monthly* threshold and
+still drain a credit.
 
-**Pick the grain deliberately**, because the two answer different questions:
-
-| Grain | Alarms when | Catches |
-|---|---|---|
-| `Monthly` | one month exceeds the amount | a runaway resource, a replica left warm |
-| `Annually` | *cumulative* spend exceeds it | slow, steady credit burn |
-
-Monthly is the default and the operational alarm. But note the gap it leaves:
-this stack should cost 0–15 USD/month, so twelve quiet months at 8 USD never
-trip a 30 USD monthly threshold and still empty a 100 USD credit. If what you
-want is "tell me when I have used 30 of my 100", set
-`budget_time_grain = "Annually"`.
-
-Nothing stops you running both — Azure allows multiple budgets on a resource
-group.
-
-> Azure cannot hard-stop spend on a credit subscription. The alert is the
-> mechanism, not a cap.
-
-### 2. Confirm nothing is pinned warm
+### 3. Destroy it when you are not using it
 
 ```bash
-terraform output -raw cost_posture
-```
-
-Anything reading `BILLS CONTINUOUSLY` is costing money right now.
-
-### 3. Destroy when you are done
-
-```bash
-./scripts/destroy-azure-student.sh
+./scripts/destroy-aws-student.sh
 ```
 
 The single most effective control. Everything rebuilds from this repository.
@@ -63,73 +47,74 @@ The single most effective control. Everything rebuilds from this repository.
 ## Checking what you are spending
 
 ```bash
-# Current burn
-az consumption usage list --top 20 --output table
+# Month to date, by service
+aws ce get-cost-and-usage --time-period Start=$(date +%Y-%m-01),End=$(date +%Y-%m-%d) \
+  --granularity MONTHLY --metrics UnblendedCost \
+  --group-by Type=DIMENSION,Key=SERVICE --region us-east-1
 
-# Remaining credit — portal only
-# Cost Management + Billing → Credits
+# Everything this project created
+aws resourcegroupstaggingapi get-resources \
+  --tag-filters Key=project,Values=transfer-intelligence
 
-# What exists right now
-az resource list --output table
-
-# Container Apps replicas (the thing most likely to be left warm)
-az containerapp list --query "[].{name:name, min:properties.template.scale.minReplicas}" -o table
+# The two things that always bill
+aws rds describe-db-instances --query "DBInstances[].{id:DBInstanceIdentifier,status:DBInstanceStatus}" -o table
+aws ec2 describe-instances --filters "Name=instance-state-name,Values=running" \
+  --query "Reservations[].Instances[].{id:InstanceId,type:InstanceType}" -o table
 ```
 
 ---
 
 ## The knobs, by impact
 
-### Keycloak replicas — the big one
+### Stop the two always-on components between demos
+
+These are the only components that bill continuously:
 
 ```bash
-# Before a demo: hold it warm, no cold start
-az containerapp update --name ti-auth-student \
-  --resource-group rg-transfer-intelligence-student --min-replicas 1
+# RDS — compute stops billing, storage does not. Auto-starts after 7 days.
+aws rds stop-db-instance --db-instance-identifier ti-student-db
 
-# After: back to zero
-az containerapp update --name ti-auth-student \
-  --resource-group rg-transfer-intelligence-student --min-replicas 0
+# Keycloak
+aws ec2 stop-instances --instance-ids $(terraform -chdir=infrastructure/aws output -raw keycloak_instance_id)
 ```
 
-**Left at 1, this is roughly 30–35 USD/month** — a third of the credit, spent
-almost entirely on idle time. Set it back.
-
-### API replicas
+Restart before a demo:
 
 ```bash
-az containerapp update --name ti-api-student \
-  --resource-group rg-transfer-intelligence-student --min-replicas 0
+aws rds start-db-instance --db-instance-identifier ti-student-db
+aws ec2 start-instances --instance-ids <id>
 ```
 
-The API cold-starts in seconds, not a minute, so there is rarely a reason to pin
-it.
+> The Elastic IP stays attached to a **stopped** instance, so the Keycloak URL
+> survives. An Elastic IP attached to nothing bills ~$3.60/month.
 
-### Stop the database overnight
+### Everything else needs no attention
 
-The one standing charge. Flexible Server can be stopped for up to 7 days:
+Lambda scales to zero, CloudFront and S3 sit inside the always-free tier, and
+the nightly job runs for seconds. There is nothing to turn off.
 
-```bash
-az postgres flexible-server stop  --name ti-db-student --resource-group rg-transfer-intelligence-student
-az postgres flexible-server start --name ti-db-student --resource-group rg-transfer-intelligence-student
-```
+---
 
-Compute stops billing; storage does not. It auto-starts after 7 days.
+## Things that quietly bill
 
-### Log ingestion
+The ones that do not appear in any "running resources" view:
 
-Already capped at 0.1 GB/day — a **hard** cap. To check:
+| Thing | Cost | Find it |
+|---|---|---|
+| **Unattached Elastic IP** | ~$3.60/mo | `aws ec2 describe-addresses --query "Addresses[?AssociationId==null]"` |
+| **Available EBS volume** | ~$0.08/GB/mo | `aws ec2 describe-volumes --filters Name=status,Values=available` |
+| **Manual RDS snapshots** | storage rate | `aws rds describe-db-snapshots --snapshot-type manual` |
+| **Old ECR images** | $0.10/GB/mo | lifecycle policy keeps 3 |
+| **CloudWatch log groups** | $0.50/GB ingest | retention is 14 days |
 
-```bash
-az monitor log-analytics workspace show --name ti-logs-student \
-  --resource-group rg-transfer-intelligence-student --query workspaceCapping
-```
+`destroy-aws-student.sh` checks all of these after tearing down — the reason it
+exists rather than a bare `terraform destroy`.
 
 ---
 
 ## Developing without spending
 
-Azure is for demonstrating, not iterating.
+AWS is for demonstrating, not iterating.
 
 ```bash
 docker compose up -d          # PostgreSQL + Keycloak + Mailpit
@@ -138,46 +123,42 @@ make test                     # every server-free suite
 make api && make web
 ```
 
-The full suite runs against DuckDB with no server at all. `TRANSFEROPS_AI_PROVIDER=mock`
-means no model spend locally either.
+The full suite runs against DuckDB with no server at all, and
+`TRANSFEROPS_AI_PROVIDER=mock` means no model spend either.
 
 ---
 
-## Things that will drain the credit
+## What will drain it fastest
 
 | Do not | Why |
 |---|---|
-| Provision AKS | control plane + nodes that cannot scale to zero — weeks, not months |
-| Leave `min_replicas = 1` on Keycloak | ~34 USD/month, mostly idle |
-| Add Front Door / App Gateway / Firewall | standing hourly charge before a single request |
-| Provision Premium Redis | for a cache `tr_ai` already provides |
-| Raise the database SKU | B2s ≈ 4× B1ms for a dataset that fits in RAM |
-| Enable HA on the database | provisions a second server — exactly double, permanently |
-| Uncap Log Analytics | grows with a bug, not with usage |
-| Provision ACR "just in case" | fixed ~5 USD/month; GHCR is free |
-| Deploy to a second region | doubles everything, plus egress |
+| Add a **NAT Gateway** | ~$32/month — more than the entire rest of the stack |
+| Add an **ALB** | ~$16/month before a single request |
+| Enable **Multi-AZ RDS** | exactly double, permanently |
+| Raise the **RDS class** | `db.t3.small` is roughly double `t4g.micro` |
+| Deploy **ECS/EKS** | a control plane and nodes that cannot scale to zero |
+| Use **Secrets Manager** | $0.40/secret/month for rotation nothing here does |
+| Leave an **Elastic IP unattached** | invisible, permanent |
+| Deploy to a **second region** | doubles everything, plus inter-region transfer |
 
 ---
 
-## If the credit runs out
+## If the free tier ends or the credit runs out
 
-The subscription is **disabled**, not charged. Resources stop and are eventually
-deleted.
+The account is not disabled the way an Azure credit subscription is — **AWS
+starts charging your payment method**. That is a more dangerous failure mode,
+and it is why the budget alerts matter more here than they did on Azure.
 
-To recover: renew the student offer if still eligible, or upgrade to
-pay-as-you-go — then `./scripts/deploy-azure-student.sh` rebuilds everything.
-
-Nothing in the running system is precious. The warehouse regenerates from `sql/`
-and the generator; the realm re-imports; the infrastructure is in Terraform.
-That is what makes destroying it a routine act rather than a loss.
+If you are not actively demonstrating: destroy the stack. It rebuilds in about
+fifteen minutes, and nothing in the running system is precious.
 
 ---
 
 ## Monthly checklist
 
 - [ ] Budget alerts still going to an address you read
-- [ ] `cost_posture` shows nothing billing continuously
-- [ ] `az resource list` shows only expected resources
-- [ ] Database stopped if unused for days
-- [ ] No stray resource groups from experiments
-- [ ] Credit remaining still matches the plan
+- [ ] `cost_posture` output shows nothing unexpected
+- [ ] RDS and EC2 stopped if unused for days
+- [ ] No unattached Elastic IPs, no available EBS volumes
+- [ ] No manual RDS snapshots you forgot about
+- [ ] Cost Explorer month-to-date matches expectation

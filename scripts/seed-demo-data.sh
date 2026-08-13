@@ -2,7 +2,7 @@
 # ============================================================================
 # Transfer & Conversion Intelligence Platform :: seed the deployed warehouse.
 #
-#   ./scripts/seed-demo-data.sh              # against the Azure deployment
+#   ./scripts/seed-demo-data.sh              # against the AWS deployment
 #   ./scripts/seed-demo-data.sh --local      # against docker compose
 #
 # Generates the synthetic portfolio and runs the same loader the local build
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TF_DIR="${REPO_ROOT}/infrastructure/terraform"
+TF_DIR="${REPO_ROOT}/infrastructure/aws"
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 info() { printf '  %s\n' "$*"; }
@@ -38,7 +38,7 @@ if $LOCAL; then
   export TRANSFEROPS_AUDITOR_PASSWORD="${TRANSFEROPS_AUDITOR_PASSWORD:-auditor}"
   export TRANSFEROPS_AI_PASSWORD="${TRANSFEROPS_AI_PASSWORD:-ai}"
 else
-  bold "==> Seeding the Azure warehouse"
+  bold "==> Seeding the AWS warehouse"
   command -v terraform >/dev/null 2>&1 || die "terraform is not installed."
   [[ -d "${TF_DIR}/.terraform" ]] || die "Terraform is not initialised. Deploy first."
 

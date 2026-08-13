@@ -114,52 +114,65 @@ and set `TRANSFEROPS_AI_API_KEY` to switch it on. With no key the console hides
 its AI panels and everything else — dashboards, API, deterministic assistant —
 works unchanged. That is the state CI runs in. See [The AI layer](#the-ai-layer).
 
-## Azure Student Deployment
+## AWS Student Deployment
 
-A public demo on Azure for roughly **0–15 USD/month**, sized for the $100
-Azure for Students credit.
+A public demo on AWS. **Near zero on the legacy 12-month free tier**, roughly
+20 USD/month on the newer credit-based tier — the difference is which tier your
+account has, so check first:
 
 ```bash
-export GITHUB_TOKEN=ghp_...          # needs write:packages
-./scripts/deploy-azure-student.sh    # prerequisites → terraform → seed → smoke test
+aws freetier get-free-tier-usage --region us-east-1
+```
+
+```bash
+export TRANSFEROPS_OPERATOR=you@university.edu
+./scripts/deploy-aws-student.sh      # terraform -> images -> seed -> console
+./scripts/setup-github-actions.sh    # CI, via OIDC, no access key
 ```
 
 ```text
-Static Web Apps (Free) ──▶ Container Apps: api  ──┬── PostgreSQL B1ms
-        the console          Consumption, min=0   ├── Blob Storage
-                                                  ├── Key Vault
-                       Container Apps: keycloak ──┘   (managed identity, no keys)
-                             Consumption, min=0
-                       Container Apps Job — nightly refresh, cron
-                       Log Analytics — capped at 0.1 GB/day
+CloudFront -> S3 (private)   the console, static, 1TB/mo free
+Lambda Function URL          FastAPI, SCALES TO ZERO, 1M req/mo free forever
+EC2 t3.micro                 Keycloak, ALWAYS WARM, 750h/mo free
+RDS db.t4g.micro             warehouse + keycloak databases
+EventBridge -> Lambda        nightly refresh, runs for seconds
+SSM Parameter Store          secrets, free (Secrets Manager would be ~2.80/mo)
+IAM OIDC -> role             GitHub Actions, no stored credential
 ```
 
-Nine resources, one region, one resource group. Everything either scales to
-zero, sits inside a free monthly grant, or is the smallest SKU its service
-offers. No AKS, no Front Door, no Redis, no private endpoints — each is a real
-production component and each is a standing charge.
+Two components run continuously; everything else scales to zero or sits in an
+always-free tier. No NAT gateway (~32 USD/mo), no ALB, no ECS, no Secrets
+Manager — each is a real production component and each is a standing charge.
 
-Three decisions carry most of the saving: `min_replicas = 0` on both container
-apps (holding Keycloak warm alone is ~34 USD/month, a third of the credit);
-GitHub Container Registry instead of ACR Basic's fixed ~5 USD/month; and one
-PostgreSQL server hosting both the warehouse and Keycloak's store, because
-Flexible Server bills per server.
+**The API runs on Lambda without a single application change.** AWS Lambda Web
+Adapter runs the same `uvicorn api.main:app` that runs locally, so
+`tests/api_checks.py` still drives the deployed contract — no Mangum, no handler.
+
+**Keycloak is better here than it was on Azure.** It is a stateful JVM that
+cannot scale to zero: on Container Apps that meant either ~34 USD/month held
+warm or a 40–60 second wait on the first sign-in. A t3.micro is free for 750
+hours a month and simply runs, always warm.
+
+**CI actually deploys.** Federated login on AWS is an IAM OIDC provider and a
+role inside your own account — no directory administrator, which is exactly what
+blocked the Azure attempt.
 
 The AI layer defaults to `TRANSFEROPS_AI_PROVIDER=mock` — no key, no credits,
-and every AI surface still works. Similarity and delay-risk never used a model
-in the first place: both are deterministic and live in SQL and Python.
+every AI surface working. Similarity and delay-risk never used a model at all.
 
-Tear it all down with `./scripts/destroy-azure-student.sh`.
+Tear it all down with `./scripts/destroy-aws-student.sh`, which also checks for
+the unattached Elastic IPs and orphaned EBS volumes a `terraform destroy` leaves
+billing.
 
 | | |
 | --- | --- |
-| [azure/architecture.md](azure/architecture.md) | what is deployed and why each choice |
-| [azure/cost-strategy.md](azure/cost-strategy.md) | what each component costs, and the arithmetic |
-| [azure/security.md](azure/security.md) | what holds, and what deliberately does not |
-| [azure/migration-to-enterprise.md](azure/migration-to-enterprise.md) | SKU change vs real work |
-| [docs/azure-deployment.md](docs/azure-deployment.md) | step by step, and troubleshooting |
+| [aws/architecture.md](aws/architecture.md) | what is deployed and why each choice |
+| [aws/cost-strategy.md](aws/cost-strategy.md) | what each component costs, and the arithmetic |
+| [aws/security.md](aws/security.md) | what holds, and what deliberately does not |
+| [aws/migration-to-enterprise.md](aws/migration-to-enterprise.md) | variable change vs real work |
+| [docs/aws-deployment.md](docs/aws-deployment.md) | step by step, and troubleshooting |
 | [docs/openai-configuration.md](docs/openai-configuration.md) | providers, mock mode, cost controls |
-| [docs/cost-controls.md](docs/cost-controls.md) | operator guide to staying inside the credit |
+| [docs/cost-controls.md](docs/cost-controls.md) | operator guide to staying inside the free tier |
 
 ## Deploy to PostgreSQL
 
