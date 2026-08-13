@@ -49,6 +49,31 @@
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
   --color-brand-muted: var(--brand-muted);
+  --color-primary-050: var(--primary-050);
+  --color-primary-100: var(--primary-100);
+  --color-primary-200: var(--primary-200);
+  --color-text-muted: var(--text-muted);
+  --color-text-disabled: var(--text-disabled);
+  --color-border-strong: var(--border-strong);
+
+  /* An 8px-oriented spacing scale. Registered so a component can say
+     `gap-(--space-6)` instead of choosing a number, which is how a layout
+     drifts to 22px in one place and 26px in another. */
+  --spacing-space-1: 4px;
+  --spacing-space-2: 8px;
+  --spacing-space-3: 12px;
+  --spacing-space-4: 16px;
+  --spacing-space-5: 20px;
+  --spacing-space-6: 24px;
+  --spacing-space-8: 32px;
+  --spacing-space-10: 40px;
+  --spacing-space-12: 48px;
+
+  /* The one type size the scale does not already cover: a KPI figure is meant
+     to be read across a room, and text-3xl/4xl are display sizes tuned for
+     headings rather than tabular numbers. */
+  --text-kpi: 2rem;
+  --text-kpi--line-height: 1.1;
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-bad: var(--bad);
@@ -68,11 +93,20 @@
 }
 
 :root {
-  /* Near-square. The reference design language uses a 2-4px corner throughout --
-     buttons, cards, inputs -- which reads as industrial and precise rather than
-     consumer-soft. 8px was the generic dashboard default and it was the single
-     biggest thing making this look like a different product. */
-  --radius: 0.25rem;
+  /*
+   * Corner scale. The base is the CARD radius; everything else derives from it:
+   *
+   *   --radius-sm  = base - 4px = 4px   badges
+   *   --radius-md  = base - 2px = 6px   buttons, inputs
+   *   --radius-lg  = base      = 8px   cards
+   *
+   * which is exactly the specified 4 / 6 / 8. This was briefly set to 0.25rem
+   * on the theory that "squarer is more industrial" -- but the scale is
+   * relative, so that pushed buttons to 2px and cards to 4px and flattened the
+   * distinction between a control and a container. The ratios matter more than
+   * the absolute number.
+   */
+  --radius: 0.5rem;
   --background: #f7f7f7;
   --foreground: #111111;
   --surface: #ffffff;
@@ -101,6 +135,36 @@
   --brand: #076b62;
   --brand-foreground: #ffffff;
   --brand-muted: #b9dfda;
+
+  /*
+   * Teal surface ramp.
+   *
+   * Interaction colour is used at roughly 8-12% of the page; the rest stays
+   * white and neutral. These three tints are what make that ratio achievable:
+   * a panel can read as "this one is the AI surface" or "this row is selected"
+   * without filling anything with saturated teal.
+   *
+   * --primary-050 is the AI brief background, --primary-200 its border.
+   */
+  --primary-050: #f0f8f7;
+  --primary-100: #e5f3f1;
+  --primary-200: #c7e5e1;
+
+  /* Text ramp. Four steps, because a table needs a caption that recedes and a
+     disabled control that reads as unavailable rather than merely faint. */
+  --text-muted: #697078;
+  --text-disabled: #9a9ea3;
+
+  /* The heavier rule, for a control outline or a table's header underline
+     where the hairline --border disappears. */
+  --border-strong: #cdd1d4;
+
+  /* Card elevation: a whisper, not a float. Enough to lift a container off the
+     grey page without the pile-of-floating-cards effect that a real shadow
+     stack produces on a dense analytical screen. Held as a token because a
+     component carrying its own rgba() would be a private palette, which
+     tests/web_checks.py forbids. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.03);
 
   /* Reserved status scale. Never used for a data series. */
   --ok: #2e7d32;
