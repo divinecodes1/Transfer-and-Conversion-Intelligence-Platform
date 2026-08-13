@@ -39,16 +39,21 @@ try {
 }
 
 Write-Host "`n==> Stage 1/2: ECR bootstrap"
-terraform -chdir=$Boot init -input=false
+terraform "-chdir=$Boot" init -input=false
 Assert-Native 'Terraform bootstrap init'
-terraform -chdir=$Boot apply -input=false -auto-approve -var="region=$Region" -var="prefix=$Prefix" -var="environment=$Environment"
+terraform "-chdir=$Boot" apply -input=false -auto-approve -var="region=$Region" -var="prefix=$Prefix" -var="environment=$Environment"
 Assert-Native 'Terraform bootstrap apply'
-$Region = (terraform -chdir=$Boot output -raw region).Trim()
-$ApiRepo = terraform -chdir=$Boot output -raw api_repository_url
-$KcRepo = terraform -chdir=$Boot output -raw keycloak_repository_url
+$Region = (terraform "-chdir=$Boot" output -raw region).Trim()
+$ApiRepo = terraform "-chdir=$Boot" output -raw api_repository_url
+$KcRepo = terraform "-chdir=$Boot" output -raw keycloak_repository_url
 
 Write-Host "`n==> Building and pushing images"
-aws ecr get-login-password --region $Region | docker login --username AWS --password-stdin ($ApiRepo.Split('/')[0])
+# The pipe is handed to cmd rather than run in PowerShell: Windows PowerShell
+# 5.1 re-encodes data crossing a native-to-native pipe, which corrupts the
+# authorization token and ECR answers 400 Bad Request. cmd passes the bytes
+# through unchanged. Harmless on PowerShell 7, where the pipe would also work.
+$Registry = $ApiRepo.Split('/')[0]
+cmd /c "aws ecr get-login-password --region $Region | docker login --username AWS --password-stdin $Registry"
 Assert-Native 'ECR login'
 docker build -t transfer-intelligence:base $Root
 Assert-Native 'Base image build'
@@ -89,16 +94,16 @@ if ($env:TF_VAR_github_repository) {
 }
 
 Write-Host "`n==> Stage 2/2: application resources"
-terraform -chdir=$App init -input=false
+terraform "-chdir=$App" init -input=false
 Assert-Native 'Terraform application init'
-terraform -chdir=$App apply -input=false -auto-approve -var="region=$Region" -var="prefix=$Prefix" -var="environment=$Environment"
+terraform "-chdir=$App" apply -input=false -auto-approve -var="region=$Region" -var="prefix=$Prefix" -var="environment=$Environment"
 Assert-Native 'Terraform application apply'
-$ApiUrl = terraform -chdir=$App output -raw api_url
-$AgentUrl = terraform -chdir=$App output -raw assistant_url
-$KcUrl = terraform -chdir=$App output -raw keycloak_url
-$Instance = terraform -chdir=$App output -raw keycloak_instance_id
-$RolloutDoc = terraform -chdir=$App output -raw keycloak_rollout_document
-$SeedDoc = terraform -chdir=$App output -raw warehouse_seed_document
+$ApiUrl = terraform "-chdir=$App" output -raw api_url
+$AgentUrl = terraform "-chdir=$App" output -raw assistant_url
+$KcUrl = terraform "-chdir=$App" output -raw keycloak_url
+$Instance = terraform "-chdir=$App" output -raw keycloak_instance_id
+$RolloutDoc = terraform "-chdir=$App" output -raw keycloak_rollout_document
+$SeedDoc = terraform "-chdir=$App" output -raw warehouse_seed_document
 
 Write-Host "`n==> Waiting for SSM"
 for ($i=0; $i -lt 60; $i++) {
@@ -120,9 +125,9 @@ if ($Operator) { $seedParameters += ",Operator=$Operator" }
 Invoke-SsmDocument $SeedDoc $seedParameters
 
 Write-Host "`n==> Building and publishing the console"
-$Bucket = terraform -chdir=$App output -raw console_bucket
-$Distribution = terraform -chdir=$App output -raw cloudfront_distribution_id
-$ConsoleUrl = terraform -chdir=$App output -raw console_url
+$Bucket = terraform "-chdir=$App" output -raw console_bucket
+$Distribution = terraform "-chdir=$App" output -raw cloudfront_distribution_id
+$ConsoleUrl = terraform "-chdir=$App" output -raw console_url
 Push-Location (Join-Path $Root 'web')
 try {
   $env:VITE_TRANSFEROPS_API = $ApiUrl
@@ -145,7 +150,7 @@ Assert-Native 'CloudFront invalidation'
 
 Write-Host "`nDeployment complete"
 Write-Host "Console:   $ConsoleUrl`nAPI:       $ApiUrl`nAssistant: $AgentUrl`nKeycloak:  $KcUrl"
-terraform -chdir=$App output -raw cost_posture
+terraform "-chdir=$App" output -raw cost_posture
 Assert-Native 'Terraform output'
 
 # This script exists to create the stack once. Every deployment after this one

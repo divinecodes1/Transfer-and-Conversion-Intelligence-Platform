@@ -17,10 +17,10 @@ Write-Warning "This permanently deletes the application, private RDS databases, 
 $confirmation = Read-Host "Type destroy to confirm"
 if ($confirmation -cne 'destroy') { throw 'Not confirmed. Nothing was deleted.' }
 
-terraform -chdir=$App init -input=false
-terraform -chdir=$App destroy -input=false -auto-approve -var="region=$Region" -var="prefix=$Prefix" -var="environment=$Environment"
+terraform "-chdir=$App" init -input=false
+terraform "-chdir=$App" destroy -input=false -auto-approve -var="region=$Region" -var="prefix=$Prefix" -var="environment=$Environment"
 if ((Test-Path (Join-Path $Boot '.terraform')) -or (Test-Path (Join-Path $Boot 'terraform.tfstate'))) {
-  terraform -chdir=$Boot init -input=false
-  terraform -chdir=$Boot destroy -input=false -auto-approve -var="region=$Region" -var="prefix=$Prefix" -var="environment=$Environment"
+  terraform "-chdir=$Boot" init -input=false
+  terraform "-chdir=$Boot" destroy -input=false -auto-approve -var="region=$Region" -var="prefix=$Prefix" -var="environment=$Environment"
 }
 Write-Host 'Application and ECR bootstrap states were destroyed in dependency order.'

@@ -60,7 +60,7 @@ if (-not (Test-Path (Join-Path $App '.terraform'))) {
 # `terraform output` exits non-zero for an output that does not exist, which is
 # a legitimate "not set" here rather than a failure.
 function Get-Output([string]$Name) {
-  $value = terraform -chdir=$App output -raw $Name 2>$null
+  $value = terraform "-chdir=$App" output -raw $Name 2>$null
   if ($LASTEXITCODE -ne 0) { return '' }
   return $value.Trim()
 }
