@@ -162,7 +162,10 @@ resource "aws_lambda_function" "assistant" {
       APP_ENV                      = var.environment
       AWS_LWA_PORT                 = "8100"
       AWS_LWA_READINESS_CHECK_PATH = "/healthz"
-      TRANSFEROPS_API              = aws_lambda_function_url.api.function_url
+      # Through the distribution, not the Function URL. The URL now requires
+      # AWS_IAM, and the assistant calls the API with the caller's Keycloak
+      # token rather than a signed AWS request -- CloudFront is what signs.
+      TRANSFEROPS_API              = "https://${aws_cloudfront_distribution.api.domain_name}"
       TRANSFEROPS_WEB_ORIGIN       = "https://${aws_cloudfront_distribution.console.domain_name}"
       TRANSFEROPS_AI_PROVIDER      = var.ai_provider
       TRANSFEROPS_AI_DAILY_CAP     = tostring(var.ai_daily_request_cap)
@@ -178,7 +181,7 @@ resource "aws_lambda_function" "assistant" {
 
 resource "aws_lambda_function_url" "assistant" {
   function_name      = aws_lambda_function.assistant.function_name
-  authorization_type = "NONE"
+  authorization_type = "AWS_IAM"
   cors {
     allow_origins = ["https://${aws_cloudfront_distribution.console.domain_name}"]
     allow_methods = ["GET", "POST"]
@@ -187,14 +190,18 @@ resource "aws_lambda_function_url" "assistant" {
   }
 }
 
-# Public HTTPS endpoint. AWS_IAM would be tighter, but the console is a browser
-# SPA and the platform's own authentication -- a verified Keycloak token checked
-# in api/auth.py, with entitlements enforced by row-level security -- is the
-# boundary that matters. Putting IAM in front would mean signing every request
-# with SigV4 from the browser, which needs credentials in the browser.
+# Reached only through CloudFront (api_ingress.tf), which signs every request
+# with SigV4 via an Origin Access Control. The browser therefore needs no AWS
+# credential of its own -- the objection that used to make AWS_IAM impractical
+# here -- and the function URL is not invocable by anyone but that distribution.
+#
+# The platform's own authentication is still the boundary that matters: a
+# verified Keycloak token checked in api/auth.py, with entitlements enforced by
+# row-level security. IAM in front of it governs *who may reach the endpoint*,
+# not who may see which rows.
 resource "aws_lambda_function_url" "api" {
   function_name      = aws_lambda_function.api.function_name
-  authorization_type = "NONE"
+  authorization_type = "AWS_IAM"
 
   cors {
     allow_origins  = ["https://${aws_cloudfront_distribution.console.domain_name}"]

@@ -16,13 +16,13 @@ output "console_url" {
 }
 
 output "api_url" {
-  description = "Lambda Function URL. Swagger at /docs."
-  value       = aws_lambda_function_url.api.function_url
+  description = "HTTPS ingress for the analytics API. Swagger at /docs."
+  value       = "https://${aws_cloudfront_distribution.api.domain_name}"
 }
 
 output "assistant_url" {
-  description = "HTTPS Lambda Function URL for the reporting assistant."
-  value       = aws_lambda_function_url.assistant.function_url
+  description = "HTTPS ingress for the reporting assistant."
+  value       = "https://${aws_cloudfront_distribution.assistant.domain_name}"
 }
 
 output "keycloak_url" {
