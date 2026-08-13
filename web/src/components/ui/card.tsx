@@ -5,7 +5,14 @@ export const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDi
   ({ className, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn("rounded-lg border border-border bg-card text-card-foreground", className)}
+      // shadow-(--shadow-card) references the token rather than declaring a
+      // colour here: a component carrying its own rgba() would be a private
+      // palette, which tests/web_checks.py forbids. The token is `none` in dark
+      // mode, where depth comes from the surface being lighter than the page.
+      className={cn(
+        "rounded-lg border border-border bg-card text-card-foreground shadow-(--shadow-card)",
+        className,
+      )}
       {...props}
     />
   ),

@@ -157,7 +157,12 @@ export function AiInsightCard({
   if (!enabled) return null;
 
   return (
-    <Card>
+    // The AI surface is tinted, not decorated. A pale teal ground and a teal
+    // border mark it as generated content while keeping it inside the same
+    // visual system as every other panel — no purple, no gradient, no glow.
+    // The point is that a reader can tell where a narrative came from, not
+    // that the panel looks exciting.
+    <Card className="border-primary-200 bg-primary-050">
       <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
         <div>
           <CardTitle className="flex items-center gap-2">

@@ -216,12 +216,26 @@ export function Panel({
 }
 
 // ---- KPI tile --------------------------------------------------------------
+/**
+ * A single headline figure.
+ *
+ * The card stays white and only the *number* takes the status colour — a tile
+ * filled with red reads as an alarm the moment it renders and stops being
+ * scannable next to five others.
+ *
+ * `status` is the text equivalent of `tone`. Colour alone is not a status:
+ * roughly one reader in twelve cannot separate the amber from the green, and a
+ * screen reader announces neither. Passing a tone without a status is allowed
+ * — some figures genuinely have no state — but a tone that *means* something
+ * should always carry its word.
+ */
 export function KpiTile({
   label,
   value,
   unit,
   hint,
   tone = "neutral",
+  status,
   loading,
 }: {
   label: string;
@@ -229,6 +243,7 @@ export function KpiTile({
   unit?: string;
   hint?: string;
   tone?: "neutral" | "ok" | "warn" | "bad";
+  status?: string;
   loading?: boolean;
 }) {
   const toneClass = {
@@ -244,13 +259,19 @@ export function KpiTile({
         {label}
       </div>
       {loading ? (
-        <Skeleton className="mt-2 h-7 w-20" />
+        <Skeleton className="mt-2 h-8 w-20" />
       ) : (
-        <div className={cn("num mt-1 text-[30px] font-semibold leading-tight tabular-nums", toneClass)}>
+        <div className={cn("num mt-1 text-kpi font-semibold tabular-nums", toneClass)}>
           {value}
           {unit ? <span className="ml-1 text-sm font-normal text-muted-foreground">{unit}</span> : null}
         </div>
       )}
+      {status ? (
+        <div className={cn("mt-1.5 flex items-center gap-1.5 text-xs font-medium", toneClass)}>
+          <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
+          {status}
+        </div>
+      ) : null}
       {hint ? <div className="mt-1 text-xs text-muted-foreground">{hint}</div> : null}
     </Card>
   );

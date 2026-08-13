@@ -219,6 +219,21 @@
   --brand-foreground: oklch(0.93 0.01 250);
   --brand-muted: oklch(0.62 0.09 195);
 
+  /* The teal ramp inverts: in dark mode a "tinted surface" has to be lighter
+     than the page, not darker, or the AI panel reads as a hole in the screen. */
+  --primary-050: oklch(0.24 0.02 200);
+  --primary-100: oklch(0.27 0.03 200);
+  --primary-200: oklch(0.34 0.04 200);
+
+  --text-muted: oklch(0.68 0.014 250);
+  --text-disabled: oklch(0.52 0.012 250);
+  --border-strong: oklch(0.38 0.017 250);
+
+  /* Shadows do not read on a dark ground -- depth there comes from the surface
+     being lighter than the page. Set to none rather than left undefined, so
+     the token always resolves. */
+  --shadow-card: none;
+
   --ok: oklch(0.76 0.15 160);
   --warn: oklch(0.81 0.15 80);
   --bad: oklch(0.66 0.18 25);
