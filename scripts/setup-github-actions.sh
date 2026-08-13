@@ -67,9 +67,12 @@ STORAGE_ACCOUNT="$(tf storage_account)"
 # it from Azure rather than reconstructing it, so a renamed app is still found.
 CONTAINER_APP="$(az containerapp list --resource-group "${RESOURCE_GROUP}" \
   --query "[?contains(name, 'api')].name | [0]" -o tsv 2>/dev/null || true)"
+KEYCLOAK_APP="$(az containerapp list --resource-group "${RESOURCE_GROUP}" \
+  --query "[?contains(name, 'auth')].name | [0]" -o tsv 2>/dev/null || true)"
 
 info "Resource group  ${RESOURCE_GROUP}"
 info "Container App   ${CONTAINER_APP:-<not found>}"
+info "Keycloak App    ${KEYCLOAK_APP:-<not found>}"
 info "Storage account ${STORAGE_ACCOUNT}"
 info "API             ${API_URL}"
 info "Console         ${WEB_URL}"
@@ -183,6 +186,7 @@ set_secret AZURE_TENANT_ID       "${TENANT_ID}"
 set_secret AZURE_SUBSCRIPTION_ID "${SUBSCRIPTION_ID}"
 set_secret AZURE_RESOURCE_GROUP  "${RESOURCE_GROUP}"
 set_secret AZURE_CONTAINER_APP   "${CONTAINER_APP}"
+set_secret AZURE_KEYCLOAK_APP    "${KEYCLOAK_APP}"
 set_secret AZURE_STORAGE_ACCOUNT "${STORAGE_ACCOUNT}"
 
 # ---- 7. The model API key ---------------------------------------------------

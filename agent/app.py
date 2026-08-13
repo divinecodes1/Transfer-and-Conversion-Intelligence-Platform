@@ -25,7 +25,8 @@ import time
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -48,12 +49,15 @@ app = FastAPI(
 class ApiClient:
     """Thin wrapper so the agent can be driven in-process during tests."""
 
-    def __init__(self, base_url=API_BASE, client=None, identity=None):
+    def __init__(self, base_url=API_BASE, client=None, identity=None, authorization=None):
         self.identity = identity
+        self.authorization = authorization
         self._client = client or httpx.Client(base_url=base_url, timeout=30.0)
 
     def get(self, path, **params):
         headers = {"X-Demo-User": self.identity} if self.identity else {}
+        if self.authorization:
+            headers["Authorization"] = self.authorization
         clean = {k: v for k, v in params.items() if v is not None}
         r = self._client.get(path, params=clean, headers=headers)
         r.raise_for_status()
@@ -68,6 +72,20 @@ class Question(BaseModel):
     identity: str | None = None
     # deterministic | llm | auto. See `answer()` for what each one promises.
     mode: str = "auto"
+
+
+_web_origins = [
+    origin.strip()
+    for origin in os.environ.get("TRANSFEROPS_WEB_ORIGIN", "http://localhost:5173").split(",")
+    if origin.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_web_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+)
 
 
 # The abstention reasons that may be escalated to a model, and the ones that may
@@ -266,7 +284,7 @@ def answer(question, api=None, identity=None, retrieve=True, mode="deterministic
 
 
 @app.post("/ask", tags=["assistant"])
-def ask(q: Question):
+def ask(q: Question, request: Request):
     """
     Ask the assistant.
 
@@ -277,7 +295,10 @@ def ask(q: Question):
     """
     if q.mode not in ("deterministic", "llm", "auto"):
         return {"error": "mode must be deterministic, llm or auto"}
-    return answer(q.question, identity=q.identity, mode=q.mode)
+    authorization = request.headers.get("authorization")
+    if not authorization:
+        raise HTTPException(status_code=401, detail="missing bearer token")
+    return answer(q.question, api=ApiClient(authorization=authorization), mode=q.mode)
 
 
 @app.get("/modes", tags=["assistant"])
@@ -296,9 +317,15 @@ def modes():
 
 
 @app.get("/audit", tags=["assistant"])
-def audit_trail(limit: int = 50):
+def audit_trail(request: Request, limit: int = 50):
     """Every call, with its resolution and tool. Provenance is not optional --
     an answer no one can trace back is not usable for a management decision."""
+    authorization = request.headers.get("authorization")
+    if not authorization:
+        raise HTTPException(status_code=401, detail="missing bearer token")
+    # The API validates the signature, expiry and entitlement before any audit
+    # data leaves this service.
+    ApiClient(authorization=authorization).get("/whoami")
     return {"calls": audit.recent(limit), **audit.status()}
 
 
@@ -315,3 +342,8 @@ def health():
         return {"status": "healthy", "metrics_known": len(ex.codes())}
     except Exception as exc:
         return {"status": "degraded", "detail": str(exc)}
+
+
+@app.get("/healthz", tags=["service"], include_in_schema=False)
+def healthz():
+    return {"status": "healthy"}

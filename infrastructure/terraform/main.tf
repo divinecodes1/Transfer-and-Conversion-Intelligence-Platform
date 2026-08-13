@@ -167,6 +167,7 @@ module "container_app" {
 
   environment_name    = format(local.name_prefix, "cae")
   api_app_name        = format(local.name_prefix, "api")
+  agent_app_name      = format(local.name_prefix, "agent")
   job_name            = format(local.name_prefix, "etl")
   web_origin          = trimsuffix(module.storage.web_endpoint, "/")
   resource_group_name = module.resource_group.name
@@ -204,6 +205,7 @@ module "container_app" {
     TRANSFEROPS_AUTH                      = var.auth_mode
     TRANSFEROPS_LOG_FORMAT                = "json"
     TRANSFEROPS_LOG_LEVEL                 = "INFO"
+    TRANSFEROPS_WEB_ORIGIN                = trimsuffix(module.storage.web_endpoint, "/")
     TRANSFEROPS_AI_PROVIDER               = var.ai_provider
     TRANSFEROPS_AI_MODEL                  = var.ai_model
     TRANSFEROPS_AI_BASE_URL               = var.ai_base_url

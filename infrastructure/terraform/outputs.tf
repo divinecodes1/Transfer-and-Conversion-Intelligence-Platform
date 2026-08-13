@@ -20,6 +20,11 @@ output "api_url" {
   value       = module.container_app.api_url
 }
 
+output "agent_url" {
+  description = "Public HTTPS endpoint of the catalogue-bound reporting assistant."
+  value       = module.container_app.agent_url
+}
+
 output "web_url" {
   description = "Public HTTPS endpoint of the console."
   value       = trimsuffix(module.storage.web_endpoint, "/")

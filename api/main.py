@@ -17,9 +17,11 @@ Run it:
     uvicorn api.main:app --reload
     http://127.0.0.1:8000/docs
 """
+import os
 import time
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from observability import logs, telemetry
@@ -51,6 +53,12 @@ async def scope_requests(request: Request, call_next):
     endpoint cannot forget to apply entitlements, because it never applies them --
     the database does, from a value established before the handler runs.
     """
+    # Probes need a database round-trip but must not require an end-user token.
+    # The response contains no portfolio data; every user-facing route remains
+    # behind resolve().
+    if request.url.path == "/healthz":
+        return await call_next(request)
+
     # One id for the whole request, continuing an upstream trace when there is
     # one, so a dashboard panel and the API call under it share a correlation id.
     request_id = logs.new_request_id(request.headers.get("x-request-id"))
@@ -86,6 +94,21 @@ async def scope_requests(request: Request, call_next):
         "identity": identity.username, "auth_source": identity.source})
     response.headers["X-Request-ID"] = request_id
     return response
+
+
+_web_origins = [
+    origin.strip()
+    for origin in os.environ.get("TRANSFEROPS_WEB_ORIGIN", "http://localhost:5173").split(",")
+    if origin.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_web_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
+)
 
 
 @app.get("/observability/metrics", tags=["service"], include_in_schema=False)
@@ -198,6 +221,16 @@ def health():
         return {"status": "healthy", "projects": row["n"], "data_as_of": db.data_as_of()}
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"warehouse unreachable: {exc}")
+
+
+@app.get("/healthz", tags=["service"], include_in_schema=False)
+def healthz():
+    """Public probe: verify process and warehouse connectivity without data."""
+    try:
+        db.fetch_one("SELECT 1 AS ok")
+        return {"status": "healthy"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="warehouse unreachable")
 
 
 # ---- The catalogue --------------------------------------------------------

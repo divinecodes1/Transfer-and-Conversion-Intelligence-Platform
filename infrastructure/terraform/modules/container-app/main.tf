@@ -13,6 +13,7 @@
 
 variable "environment_name" { type = string }
 variable "api_app_name" { type = string }
+variable "agent_app_name" { type = string }
 variable "job_name" { type = string }
 variable "web_origin" { type = string }
 variable "resource_group_name" { type = string }
@@ -252,7 +253,7 @@ resource "azurerm_container_app" "api" {
       liveness_probe {
         transport               = "HTTP"
         port                    = 8000
-        path                    = "/health"
+        path                    = "/healthz"
         initial_delay           = 15
         interval_seconds        = 30
         failure_count_threshold = 3
@@ -261,7 +262,7 @@ resource "azurerm_container_app" "api" {
       readiness_probe {
         transport               = "HTTP"
         port                    = 8000
-        path                    = "/health"
+        path                    = "/healthz"
         interval_seconds        = 10
         failure_count_threshold = 3
       }
@@ -272,6 +273,137 @@ resource "azurerm_container_app" "api" {
     http_scale_rule {
       name                = "http-concurrency"
       concurrent_requests = 20
+    }
+  }
+}
+
+# The catalogue-bound reporting assistant is a distinct process and trust
+# boundary. It forwards the caller's bearer token to the governed API and owns
+# no direct read credential; only its audit writer can insert provenance rows.
+resource "azurerm_container_app" "agent" {
+  name                         = var.agent_app_name
+  resource_group_name          = var.resource_group_name
+  container_app_environment_id = azurerm_container_app_environment.this.id
+  revision_mode                = "Single"
+  workload_profile_name        = "Consumption"
+  tags                         = var.tags
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [var.identity_id]
+  }
+
+  dynamic "registry" {
+    for_each = var.registry_server == "" ? [] : [1]
+    content {
+      server               = var.registry_server
+      identity             = var.registry_uses_identity ? var.identity_id : null
+      username             = var.registry_uses_identity ? null : var.registry_username
+      password_secret_name = var.registry_uses_identity ? null : "registry-password"
+    }
+  }
+
+  secret {
+    name  = "dsn-auditor"
+    value = local.dsn.auditor
+  }
+
+  dynamic "secret" {
+    for_each = contains(keys(local.container_secrets), "ai-api-key") ? [1] : []
+    content {
+      name  = "ai-api-key"
+      value = var.secrets["ai-api-key"]
+    }
+  }
+
+  dynamic "secret" {
+    for_each = var.registry_password != "" ? [1] : []
+    content {
+      name  = "registry-password"
+      value = var.registry_password
+    }
+  }
+
+  ingress {
+    external_enabled           = true
+    target_port                = 8100
+    transport                  = "auto"
+    allow_insecure_connections = false
+
+    traffic_weight {
+      percentage      = 100
+      latest_revision = true
+    }
+  }
+
+  template {
+    min_replicas = var.min_replicas
+    max_replicas = var.max_replicas
+
+    container {
+      name   = "agent"
+      image  = var.image
+      cpu    = var.cpu
+      memory = var.memory
+
+      command = ["uvicorn"]
+      args = [
+        "agent.app:app",
+        "--host", "0.0.0.0",
+        "--port", "8100",
+        "--workers", "1",
+      ]
+
+      dynamic "env" {
+        for_each = local.plain_env
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+
+      env {
+        name  = "TRANSFEROPS_API"
+        value = "https://${azurerm_container_app.api.ingress[0].fqdn}"
+      }
+      env {
+        name        = "TRANSFEROPS_AUDIT_DSN"
+        secret_name = "dsn-auditor"
+      }
+      env {
+        name  = "TRANSFEROPS_WEB_ORIGIN"
+        value = var.web_origin
+      }
+
+      dynamic "env" {
+        for_each = contains(keys(local.container_secrets), "ai-api-key") ? [1] : []
+        content {
+          name        = "TRANSFEROPS_AI_API_KEY"
+          secret_name = "ai-api-key"
+        }
+      }
+
+      liveness_probe {
+        transport               = "HTTP"
+        port                    = 8100
+        path                    = "/healthz"
+        initial_delay           = 10
+        interval_seconds        = 30
+        failure_count_threshold = 3
+      }
+
+      readiness_probe {
+        transport               = "HTTP"
+        port                    = 8100
+        path                    = "/healthz"
+        interval_seconds        = 10
+        failure_count_threshold = 3
+      }
+    }
+
+    http_scale_rule {
+      name                = "http-concurrency"
+      concurrent_requests = 10
     }
   }
 }
@@ -557,6 +689,7 @@ resource "azurerm_container_app_job" "refresh" {
 
 output "api_fqdn" { value = azurerm_container_app.api.ingress[0].fqdn }
 output "api_url" { value = "https://${azurerm_container_app.api.ingress[0].fqdn}" }
+output "agent_url" { value = "https://${azurerm_container_app.agent.ingress[0].fqdn}" }
 output "keycloak_url" { value = "https://${azurerm_container_app.keycloak.ingress[0].fqdn}" }
 output "keycloak_app_name" { value = azurerm_container_app.keycloak.name }
 output "environment_id" { value = azurerm_container_app_environment.this.id }
