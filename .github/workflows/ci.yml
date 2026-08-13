@@ -77,6 +77,11 @@ jobs:
       - name: Mart layer (the console's rollups vs the metric layer)
         run: python tests/mart_checks.py
 
+      # Readiness weighting, lane re-graining and similarity scoring, each
+      # recomputed in Python from the same rows the warehouse used.
+      - name: Readiness, network and similarity
+        run: python tests/readiness_checks.py
+
       - name: AI layer boundaries (runs without a model)
         run: python tests/ai_checks.py
 
@@ -159,4 +164,4 @@ jobs:
 
       - name: Summary
         if: success()
-        run: echo "All seventeen suites green, and the console builds."
+        run: echo "All eighteen suites green, and the console builds."

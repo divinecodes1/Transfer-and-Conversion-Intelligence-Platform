@@ -1,9 +1,32 @@
 # Generated data and warehouses — rebuilt by `make data` / `make build`
 data/*.csv
 warehouse*.duckdb
+# The sidecars DuckDB writes beside a database. `warehouse*.duckdb` does not
+# match them, so a `git add -A` while a suite still held one open failed with
+# "Permission denied" on the .wal — git was trying to index a file the engine
+# had locked. They are as regenerable as the database itself.
+*.duckdb.wal
+*.duckdb.tmp/
+*.duckdb.tmp
+
+# Secrets and local configuration.
+#
+# .dockerignore has excluded these since the first image build; .gitignore did
+# not, so a local .env full of real credentials was one `git add .` away from
+# being published. tests/security_checks.py catches it, which is how this was
+# found -- the gate is the reason the omission did not survive.
+.env
+.env.*
+!.env.example
 
 # Environments
 .venv*/
+venv/
+env/
+# The interpreter directory a fresh checkout tends to create beside the code.
+# `.venv*/` does not match a venv named after the project.
+transfer-intelegence-platform/
+transfer-intelligence-platform/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -16,6 +39,7 @@ web/dist/
 # Local tooling state
 .streamlit/
 .claude/settings.local.json
+.runtime/
 
 # NOT ignored, deliberately: sql/, docs/, observability/grafana/, keycloak/.
 # Dashboards, realms and metric definitions are provisioned from version control,

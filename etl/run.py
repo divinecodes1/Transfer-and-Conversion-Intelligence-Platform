@@ -121,6 +121,40 @@ def data_quality(fetch):
                        "JOIN tr_core.dim_project p USING(project_key) "
                        "WHERE p.status <> 'COMPLETED'") == 0,
                    "population guard holds"))
+    # A weight set that sums to anything other than 100 still produces a
+    # plausible-looking percentage, which is exactly why it is gated rather than
+    # trusted: the readiness score would be wrong and would not look wrong.
+    checks.append(("readiness weights sum to 100",
+                   one("SELECT SUM(weight_pct) FROM tr_core.dim_readiness_dimension") == 100,
+                   "the weighted mean has a valid denominator"))
+    checks.append(("readiness scores are percentages",
+                   one("SELECT COUNT(*) FROM tr_core.fact_readiness_assessment "
+                       "WHERE score_pct < 0 OR score_pct > 100") == 0,
+                   "0..100, so a band cannot be reached by an impossible score"))
+    # Caught a real defect: assessments were dated from the wall clock while the
+    # warehouse vintage is the newest snapshot, so readiness was recorded days
+    # *after* the data it describes and the average assessment age came out
+    # negative. Nothing else in the platform would have noticed.
+    checks.append(("no readiness assessed after the data vintage",
+                   one("SELECT COUNT(*) FROM tr_core.fact_readiness_assessment "
+                       "WHERE assessed_on > "
+                       "(SELECT data_as_of FROM tr_metric.v_data_vintage)") == 0,
+                   "assessment age is never negative"))
+    checks.append(("readiness covers in-flight projects only",
+                   one("SELECT COUNT(*) FROM tr_core.fact_readiness_assessment a "
+                       "JOIN tr_core.dim_project p USING(project_key) "
+                       "WHERE p.status NOT IN ('ACTIVE','PLANNED')") == 0,
+                   "no completed or cancelled project carries a readiness score"))
+    # Partial coverage is the subtler failure: the weighted mean divides by the
+    # weights it actually found, so a project missing its qualification row would
+    # score high on the strength of the six dimensions that did arrive.
+    checks.append(("every assessed project has every dimension",
+                   one("SELECT COUNT(*) FROM ("
+                       "  SELECT project_key FROM tr_metric.v_project_readiness_dimension"
+                       "  GROUP BY project_key"
+                       "  HAVING COUNT(*) <> (SELECT COUNT(*) FROM tr_core.dim_readiness_dimension)"
+                       ") x") == 0,
+                   "no project is scored on a partial weight set"))
     return checks
 
 

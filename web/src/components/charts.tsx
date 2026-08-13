@@ -269,19 +269,25 @@ export function BoxPlot({
 
   const max = Math.max(...values);
   const min = Math.min(0, Math.min(...values));
-  const padTop = 16;
-  const padBottom = 44;
+  const padTop = 20;
+  const padBottom = 48;
   const padLeft = 48;
+  const padRight = 24;
+  const minBandWidth = 110;
+  const viewWidth = Math.max(padLeft + padRight + rows.length * minBandWidth, 420);
+  const plotWidth = viewWidth - padLeft - padRight;
   const plotHeight = height - padTop - padBottom;
   const scale = (value: number) =>
     padTop + plotHeight - ((value - min) / (max - min || 1)) * plotHeight;
 
-  const bandWidth = 100 / rows.length;
+  const bandWidth = plotWidth / rows.length;
+  const boxWidth = Math.min(60, bandWidth * 0.58);
 
   return (
     <svg
-      viewBox={`0 0 ${Math.max(rows.length * 110, 420)} ${height}`}
-      className="h-auto w-full"
+      viewBox={`0 0 ${viewWidth} ${height}`}
+      className="block h-auto w-full max-w-none"
+      style={{ minWidth: viewWidth }}
       role="img"
       aria-label="Cycle-time distribution by cohort"
     >
@@ -291,7 +297,7 @@ export function BoxPlot({
           <g key={fraction}>
             <line
               x1={padLeft}
-              x2="100%"
+              x2={viewWidth - padRight}
               y1={scale(value)}
               y2={scale(value)}
               stroke="var(--grid)"
@@ -311,8 +317,9 @@ export function BoxPlot({
       })}
 
       {rows.map((row, index) => {
-        const centre = padLeft + (index + 0.5) * ((100 - padLeft / 5) * bandWidth * 0.9);
-        const x = padLeft + 30 + index * 105;
+        const centre = padLeft + (index + 0.5) * bandWidth;
+        const x = centre - boxWidth / 2;
+        const p90Inset = Math.min(12, boxWidth * 0.2);
         const colour = categorical(index);
         const box = {
           top: row.p75 === null ? null : scale(row.p75),
@@ -322,8 +329,8 @@ export function BoxPlot({
           <g key={row.cohort} data-centre={centre}>
             {row.min_days !== null && row.max_days !== null ? (
               <line
-                x1={x + 30}
-                x2={x + 30}
+                x1={centre}
+                x2={centre}
                 y1={scale(row.min_days)}
                 y2={scale(row.max_days)}
                 stroke={colour}
@@ -334,7 +341,7 @@ export function BoxPlot({
               <rect
                 x={x}
                 y={box.top}
-                width={60}
+                width={boxWidth}
                 height={Math.max(box.bottom - box.top, 1)}
                 fill={colour}
                 fillOpacity={0.25}
@@ -346,7 +353,7 @@ export function BoxPlot({
             {row.p50 !== null ? (
               <line
                 x1={x}
-                x2={x + 60}
+                x2={x + boxWidth}
                 y1={scale(row.p50)}
                 y2={scale(row.p50)}
                 stroke={colour}
@@ -355,8 +362,8 @@ export function BoxPlot({
             ) : null}
             {row.p90 !== null ? (
               <line
-                x1={x + 12}
-                x2={x + 48}
+                x1={x + p90Inset}
+                x2={x + boxWidth - p90Inset}
                 y1={scale(row.p90)}
                 y2={scale(row.p90)}
                 stroke={colour}
@@ -365,7 +372,7 @@ export function BoxPlot({
               />
             ) : null}
             <text
-              x={x + 30}
+              x={centre}
               y={height - 24}
               textAnchor="middle"
               fontSize="11"
@@ -374,7 +381,7 @@ export function BoxPlot({
               {row.cohort}
             </text>
             <text
-              x={x + 30}
+              x={centre}
               y={height - 10}
               textAnchor="middle"
               fontSize="10"

@@ -42,6 +42,12 @@ IMPLEMENTS = {
     # metric is the population of this view, and binding it to the key is what
     # makes gate 3 able to prove no cancelled project is being counted as WIP.
     "PORTFOLIO_WIP":                  ("tr_metric.v_project_wip",              "project_key"),
+    "TRANSFER_READINESS_SCORE":       ("tr_metric.v_project_readiness",        "readiness_pct"),
+    "READINESS_DIMENSION_SCORE":      ("tr_metric.v_project_readiness_dimension", "score_pct"),
+    # No project grain, so gate 3 skips it -- the lane is the grain, and the
+    # cancelled-project exclusion is enforced upstream in mart_project_register.
+    "ROUTE_BOTTLENECK_STAGE":         ("tr_mart.mart_route_bottleneck",        "bottleneck_stage"),
+    "TRANSFER_SIMILARITY_SCORE":      ("tr_metric.v_transfer_similarity",      "similarity_pct"),
 }
 
 

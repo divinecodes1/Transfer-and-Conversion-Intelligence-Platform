@@ -21,10 +21,13 @@ deterministic assistant carry on untouched.
 """
 import hashlib
 import hmac
+import inspect
 import os
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.params import Param
 from pydantic import BaseModel, Field
+from pydantic_core import PydanticUndefined
 
 from ai import gateway, snapshot as snap, store
 from ai.errors import AiError, AiUnavailable
@@ -65,8 +68,21 @@ class _LocalApi:
         if name is None:
             raise AiError(f"{path} is not a governed route.")
         from . import main as governed
+        route = getattr(governed, name)
         clean = {k: v for k, v in params.items() if v is not None}
-        return getattr(governed, name)(**clean)
+
+        # FastAPI replaces Query(...) markers with plain values when a route is
+        # entered over HTTP.  This adapter intentionally calls the same route
+        # in-process, so omitted parameters need that small piece of dependency
+        # resolution here as well; otherwise a Query object can reach the SQL
+        # driver's parameter list (for example mart_projects' default offset).
+        for parameter in inspect.signature(route).parameters.values():
+            marker = parameter.default
+            if (parameter.name not in clean and isinstance(marker, Param)
+                    and marker.default is not PydanticUndefined):
+                clean[parameter.name] = marker.default
+
+        return route(**clean)
 
 
 def _require_model():

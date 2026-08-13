@@ -250,8 +250,13 @@ def build_history(proj):
             cur = dt.date(y, m, 1)
 
     # ---- milestone events (planned from baseline, actual from realised schedule)
+    # Plan and actual share the project's stage shape: a project whose
+    # qualification stage is long planned for it being long. Using the nominal
+    # fractions for the plan and the project's own for the actual would make every
+    # project appear to miss its interior milestones by construction.
     events = []
-    for code, name, seq, frac in MILESTONES:
+    fracs = stage_fracs(pk)
+    for (code, name, seq, _nominal), frac in zip(MILESTONES, fracs):
         planned = d(start, proj["_base_dur"] * frac)
         actual = None
         estatus = "PLANNED"
@@ -268,7 +273,7 @@ def build_history(proj):
     return revisions, snapshots, events
 
 
-def build_readiness(projects, rng):
+def build_readiness(projects, rng, vintage):
     """
     One readiness row per in-flight project per dimension.
 
@@ -287,6 +292,14 @@ def build_readiness(projects, rng):
     `rng` is a private stream. The existing generator's draws are untouched, so
     dim_project and every history table stay byte-identical and the golden gate
     keeps asserting the same numbers it always did.
+
+    `vintage` is the newest project snapshot, i.e. what the warehouse will report
+    as `data_as_of`, and assessments are dated backwards from it rather than from
+    TODAY. Anchoring to the wall clock instead produced assessments dated *after*
+    the data vintage and an average assessment age of MINUS seven days -- a
+    readiness score the warehouse could not yet have known about. Everything
+    time-relative in this platform is measured against the vintage for exactly
+    this reason.
     """
     rows = []
     golden_key = None
@@ -316,7 +329,7 @@ def build_readiness(projects, rng):
             rows.append({
                 "project_key": p["project_key"],
                 "dimension_code": code,
-                "assessed_on": TODAY - dt.timedelta(days=age),
+                "assessed_on": vintage - dt.timedelta(days=age),
                 "score_pct": scores[code],
             })
     return rows, golden_key
@@ -404,8 +417,11 @@ def main():
               ["calendar_date","fiscal_week","fiscal_month","fiscal_quarter","fiscal_year"])
 
     # Readiness draws from its own stream, after every table above is settled, so
-    # adding it cannot move a single existing number.
-    readiness, golden_readiness_key = build_readiness(projects, random.Random(SEED))
+    # adding it cannot move a single existing number. It is dated from the newest
+    # snapshot -- the warehouse's own `data_as_of` -- not from the wall clock.
+    vintage = max(s["snapshot_date"] for s in snapshots)
+    readiness, golden_readiness_key = build_readiness(
+        projects, random.Random(SEED), vintage)
     write_csv("dim_readiness_dimension.csv",
               [{"dimension_code": c, "dimension_name": n, "weight_pct": w, "sequence_no": s}
                for c, n, w, s in READINESS_DIMENSIONS],

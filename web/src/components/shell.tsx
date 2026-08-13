@@ -8,6 +8,7 @@ import {
   BookOpen,
   BrainCircuit,
   ChevronDown,
+  ClipboardCheck,
   Cloud,
   CloudOff,
   Database,
@@ -28,6 +29,7 @@ import {
   Timer,
   TrendingUp,
   UserCircle2,
+  Waypoints,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -64,13 +66,17 @@ const NAV_SECTIONS: NavSection[] = [
   },
   {
     label: "Transfer Management",
-    items: [{ to: "/projects", label: "Transfer Portfolio", icon: Table2 }],
+    items: [
+      { to: "/projects", label: "Transfer Portfolio", icon: Table2 },
+      { to: "/readiness", label: "Readiness", icon: ClipboardCheck },
+    ],
   },
   {
     label: "Performance",
     items: [
       { to: "/distribution", label: "Cycle-time Distribution", icon: TrendingUp },
       { to: "/forecast-accuracy", label: "Forecast vs Actual", icon: Timer },
+      { to: "/network", label: "Transfer Network", icon: Waypoints },
     ],
   },
   {

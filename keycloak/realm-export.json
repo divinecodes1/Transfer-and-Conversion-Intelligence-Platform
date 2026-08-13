@@ -87,14 +87,6 @@
       ]
     }
   ],
-  "_comment_default_roles": [
-    "Every user carries 'default-roles-transferops' alongside their application",
-    "role. Keycloak creates that composite during import and hangs the account",
-    "client's view-profile and manage-account roles off it -- so it is what lets",
-    "a signed-in user open the account console ('Manage account' in the shell).",
-    "An explicit realmRoles list REPLACES the defaults rather than adding to it,",
-    "so omitting it here is what makes /realms/transferops/account answer 401."
-  ],
   "users": [
     {
       "username": "admin.demo",

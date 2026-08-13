@@ -41,6 +41,8 @@ import { CatalogueScreen } from "@/routes/catalogue";
 import { ConnectionsScreen } from "@/routes/connections";
 import { DistributionScreen } from "@/routes/distribution";
 import { ForecastAccuracyScreen } from "@/routes/forecast-accuracy";
+import { NetworkScreen } from "@/routes/network";
+import { ReadinessScreen } from "@/routes/readiness";
 import { IngestionScreen } from "@/routes/ingestion";
 import { OverviewScreen } from "@/routes/overview";
 import { ProjectDetailScreen } from "@/routes/project-detail";
@@ -203,6 +205,8 @@ const indexRoute = screen("/", OverviewScreen);
 const projectsRoute = screen("/projects", ProjectsScreen);
 const distributionRoute = screen("/distribution", DistributionScreen);
 const forecastRoute = screen("/forecast-accuracy", ForecastAccuracyScreen);
+const readinessRoute = screen("/readiness", ReadinessScreen);
+const networkRoute = screen("/network", NetworkScreen);
 const reportsRoute = screen("/reports", ReportsScreen);
 const askRoute = screen("/ask", AskScreen);
 const catalogueRoute = screen("/catalogue", CatalogueScreen);
@@ -238,6 +242,8 @@ const routeTree = rootRoute.addChildren([
   projectDetailRoute,
   distributionRoute,
   forecastRoute,
+  readinessRoute,
+  networkRoute,
   reportsRoute,
   askRoute,
   catalogueRoute,

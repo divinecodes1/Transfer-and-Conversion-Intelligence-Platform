@@ -9,7 +9,7 @@ analysis of the source, or the pipeline driven against a recorded fake.
 That is deliberate. A guard that only holds when a live provider answers is a
 guard that stops running the first week the credential expires.
 
-Twelve assertions, in four groups:
+Thirteen assertions, in four groups:
 
   Boundaries      ai/ holds no SQL, no driver, no credential in source, and can
                   only reach data through the governed API.
@@ -110,6 +110,8 @@ class FakeReply:
 def run():
     from ai import ask, gateway, insights, prompts, risk, snapshot
     from ai.errors import AiError, AiUnavailable
+    from api import ai_routes, main
+    from fastapi import Query
 
     results = []
 
@@ -178,6 +180,24 @@ def run():
     results.append(("the snapshot reads only governed mart endpoints",
                     all(path.startswith("/mart/") for path in paths),
                     f"called {sorted(paths)}"))
+
+    # The in-process adapter bypasses FastAPI's HTTP parameter resolution.  It
+    # must therefore unwrap Query defaults itself before calling a governed
+    # route, or those marker objects can leak into a database parameter list.
+    original_projects = main.mart_projects
+    captured = {}
+    try:
+        def fake_projects(limit: int = Query(200), offset: int = Query(0)):
+            captured.update(limit=limit, offset=offset)
+            return {"projects": []}
+
+        main.mart_projects = fake_projects
+        ai_routes._LocalApi().get("/mart/projects", limit=10)
+    finally:
+        main.mart_projects = original_projects
+    results.append(("in-process routes resolve FastAPI Query defaults",
+                    captured == {"limit": 10, "offset": 0},
+                    f"resolved {captured}"))
 
     key_a = snapshot.scope_key("portfolio_overview", {"portfolio": "PF_AUTO"})
     key_b = snapshot.scope_key("portfolio_overview", {"portfolio": "PF_POWER"})

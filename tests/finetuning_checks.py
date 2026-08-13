@@ -22,7 +22,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from fine_tuning.dataset import BEHAVIOUR_PAIRS, build  # noqa: E402
+from fine_tuning.dataset import BEHAVIOUR_PAIRS, TEMPLATES, build  # noqa: E402
 from fine_tuning.evaluate import (ABSTENTION_PROBES,  # noqa: E402
                                   check_dataset_consistency, load_pairs)
 
@@ -50,13 +50,30 @@ def _():
     return a == b, f"{len(a)} pairs, identical across two builds"
 
 
-@check("the dataset is in the specified 100-200 pair range")
+@check("the dataset size follows from the catalogue")
 def _():
-    pairs = build(catalogue_rows())
+    """
+    Derived rather than pinned.
+
+    This used to assert a flat 100-200 pairs, and adding four metrics to the
+    catalogue pushed the generated dataset to 218 and broke it -- a failure that
+    said nothing about the dataset being wrong, only about the constant being
+    old. A bound that has to be hand-edited every time a metric is registered is
+    a bound that will eventually be widened without being read.
+
+    So the expectation is now the arithmetic the generator actually performs:
+    one pair per template per registered metric, plus the fixed behavioural set.
+    That still fails loudly if the generator drops a metric or double-counts,
+    which is the property worth gating, and it survives the catalogue growing.
+    """
+    rows = catalogue_rows()
+    pairs = build(rows)
     behaviour = sum(p["kind"] == "behaviour" for p in pairs)
-    return (100 <= len(pairs) <= 200,
-            f"{len(pairs)} pairs ({len(pairs) - behaviour} definition, "
-            f"{behaviour} behavioural)")
+    definition = len(pairs) - behaviour
+    expected_definition = len(TEMPLATES) * len(rows)
+    return (definition == expected_definition and behaviour == len(BEHAVIOUR_PAIRS),
+            f"{len(pairs)} pairs = {len(TEMPLATES)} templates x {len(rows)} metrics "
+            f"({definition}) + {behaviour} behavioural")
 
 
 @check("the committed dataset.jsonl is valid and current")

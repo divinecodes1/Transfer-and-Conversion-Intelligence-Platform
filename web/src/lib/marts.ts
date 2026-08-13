@@ -307,6 +307,180 @@ export const scheduleDriftQuery = (filters: Filters, groupBy = "transfer_type") 
       ),
   });
 
+// ---- Readiness, network and similarity -------------------------------------
+// The bands and the weights are read from the response, never declared here.
+// A `READY` string in the browser is a label; the boundary that produced it
+// lives in sql/13_readiness_network.sql, which is what lets tests/web_checks.py
+// keep asserting the console re-derives no threshold.
+export type ReadinessBand = "READY" | "AT_RISK" | "NOT_READY";
+
+export type ReadinessRow = {
+  project_key: number;
+  project_id: string;
+  project_name: string | null;
+  transfer_type: string | null;
+  complexity_class: string | null;
+  portfolio: string | null;
+  source_site: string | null;
+  target_site: string | null;
+  status: string;
+  health: ProjectRow["health"] | null;
+  schedule_deviation_days: number | null;
+  readiness_pct: number | null;
+  readiness_band: ReadinessBand;
+  dimensions_assessed: number | null;
+  limiting_dimension: string | null;
+  limiting_dimension_name: string | null;
+  limiting_score: number | null;
+  newest_assessment: string | null;
+  assessment_age_days: number | null;
+};
+
+export type ReadinessSummary = {
+  projects: number | null;
+  avg_readiness_pct: number | null;
+  ready_count: number | null;
+  at_risk_count: number | null;
+  not_ready_count: number | null;
+  avg_assessment_age_days: number | null;
+};
+
+export type ReadinessDimensionRow = {
+  dimension_code: string;
+  dimension_name: string;
+  weight_pct: number;
+  sequence_no: number;
+  avg_score_pct: number | null;
+  min_score_pct: number | null;
+  projects: number | null;
+  below_70: number | null;
+};
+
+export type LaneRow = {
+  source_site: string;
+  target_site: string;
+  total_transfers: number;
+  active_transfers: number;
+  completed_transfers: number;
+  planned_transfers: number;
+  median_lead_time_days: number | null;
+  on_time_rate: number | null;
+  median_schedule_deviation_days: number | null;
+  avg_readiness_pct: number | null;
+  late_transfers: number | null;
+  bottleneck_stage: string | null;
+  bottleneck_median_days: number | null;
+};
+
+export type SiteFlowRow = {
+  site: string;
+  direction: "INBOUND" | "OUTBOUND";
+  transfers: number;
+  active_transfers: number;
+};
+
+export type SimilarRow = {
+  similar_project_id: string;
+  similar_project_name: string | null;
+  similarity_pct: number;
+  match_transfer_type: boolean;
+  match_complexity: boolean;
+  match_portfolio: boolean;
+  match_target_site: boolean;
+  match_source_site: boolean;
+  transfer_type: string | null;
+  complexity_class: string | null;
+  source_site: string | null;
+  target_site: string | null;
+  actual_cycle_time_days: number | null;
+  completion_variance_days: number | null;
+  on_time: boolean | null;
+  health: ProjectRow["health"] | null;
+  completion_fiscal_year: number | null;
+};
+
+/** Readiness has no fiscal-year dimension: it only describes unfinished work. */
+function readinessFilters(filters: Filters) {
+  const { fiscal_year: _drop, ...rest } = activeFilters(filters);
+  return rest;
+}
+
+export const readinessQuery = (filters: Filters, options: { band?: string } = {}) => {
+  const params = { ...readinessFilters(filters), ...options };
+  return queryOptions({
+    queryKey: ["readiness", params],
+    queryFn: ({ signal }) =>
+      get<Envelope & { summary: ReadinessSummary; projects: ReadinessRow[] }>(
+        "/readiness",
+        params,
+        signal,
+      ),
+  });
+};
+
+export const readinessDimensionsQuery = (filters: Filters) => {
+  const params = readinessFilters(filters);
+  return queryOptions({
+    queryKey: ["readiness-dimensions", params],
+    queryFn: ({ signal }) =>
+      get<Envelope & { dimensions: ReadinessDimensionRow[] }>(
+        "/readiness/dimensions",
+        params,
+        signal,
+      ),
+  });
+};
+
+export const projectReadinessQuery = (projectId: string) =>
+  queryOptions({
+    queryKey: ["project-readiness", projectId],
+    queryFn: ({ signal }) =>
+      get<
+        Envelope & {
+          assessed: boolean;
+          reason?: string;
+          overall: ReadinessRow | null;
+          dimensions: {
+            dimension_code: string;
+            dimension_name: string;
+            weight_pct: number;
+            sequence_no: number;
+            score_pct: number;
+            assessed_on: string | null;
+          }[];
+        }
+      >(`/projects/${projectId}/readiness`, undefined, signal),
+  });
+
+export const networkQuery = (minTransfers = 1) =>
+  queryOptions({
+    queryKey: ["network", minTransfers],
+    queryFn: ({ signal }) =>
+      get<Envelope & { lanes: LaneRow[]; sites: SiteFlowRow[] }>(
+        "/network",
+        { min_transfers: minTransfers },
+        signal,
+      ),
+  });
+
+export const similarQuery = (projectId: string, limit = 5) =>
+  queryOptions({
+    queryKey: ["similar", projectId, limit],
+    queryFn: ({ signal }) =>
+      get<
+        Envelope & {
+          reference_status: string;
+          outcome: {
+            n: number | null;
+            median_variance_days: number | null;
+            median_cycle_time_days: number | null;
+            on_time_rate: number | null;
+          };
+          similar: SimilarRow[];
+        }
+      >(`/projects/${projectId}/similar`, { limit }, signal),
+  });
+
 // ---- Formatting ------------------------------------------------------------
 // Shared so a value never renders two ways on two screens.
 export function fmtDays(value: number | null | undefined) {

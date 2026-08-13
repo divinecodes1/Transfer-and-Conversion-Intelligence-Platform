@@ -27,13 +27,23 @@ import {
 } from "@/components/ui/table";
 import { RiskBadge, useRiskScores } from "@/components/ai";
 import { TrendChart } from "@/components/charts";
-import { HealthBadge, KpiTile, PageHeader, Panel, QueryState } from "@/components/panels";
+import {
+  HealthBadge,
+  KpiTile,
+  PageHeader,
+  Panel,
+  QueryState,
+  ReadinessBadge,
+} from "@/components/panels";
 import { cn } from "@/lib/utils";
 import {
   fmtDate,
   fmtDays,
   fmtNumber,
+  fmtPercent,
   projectDetailQuery,
+  projectReadinessQuery,
+  similarQuery,
   type ProjectDetail,
 } from "@/lib/marts";
 
@@ -332,6 +342,10 @@ export function ProjectDetailScreen({ projectId }: { projectId: string }) {
               </Table>
             </Panel>
 
+            <ReadinessPanel projectId={projectId} />
+
+            <SimilarTransfersPanel projectId={projectId} />
+
             <Card>
               <CardContent className="p-3 text-xs text-muted-foreground">
                 Data as of{" "}
@@ -344,5 +358,182 @@ export function ProjectDetailScreen({ projectId }: { projectId: string }) {
         ) : null}
       </QueryState>
     </div>
+  );
+}
+
+/**
+ * Readiness for one transfer, dimension by dimension.
+ *
+ * The weight column is shown next to every score because it is the reason the
+ * overall number is what it is: a 61 on a 25-weight dimension is a different
+ * problem from a 61 on a 5-weight one, and a bare list of seven percentages
+ * invites a reader to average them in their head and get the wrong answer.
+ */
+function ReadinessPanel({ projectId }: { projectId: string }) {
+  const query = useQuery(projectReadinessQuery(projectId));
+  const overall = query.data?.overall;
+  const dimensions = query.data?.dimensions ?? [];
+
+  return (
+    <Panel
+      title="Transfer readiness"
+      description="Weighted preparedness to execute. Assessed for in-flight transfers only."
+      envelope={query.data}
+      actions={overall ? <ReadinessBadge band={overall.readiness_band} /> : undefined}
+    >
+      <QueryState
+        isLoading={query.isLoading}
+        error={query.error}
+        onRetry={() => void query.refetch()}
+      >
+        {query.data && !query.data.assessed ? (
+          <p className="text-sm text-muted-foreground">{query.data.reason}</p>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-baseline gap-x-3">
+              <span className="num text-[30px] font-semibold leading-none">
+                {fmtPercent(overall?.readiness_pct)}
+              </span>
+              <span className="text-sm text-muted-foreground">
+                overall, limited by{" "}
+                <span className="font-medium text-foreground">
+                  {overall?.limiting_dimension_name ?? "—"}
+                </span>
+              </span>
+            </div>
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Dimension</TableHead>
+                  <TableHead className="text-right">Weight</TableHead>
+                  <TableHead className="text-right">Score</TableHead>
+                  <TableHead className="text-right">Assessed</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {dimensions.map((dim) => (
+                  <TableRow key={dim.dimension_code}>
+                    <TableCell
+                      className={cn(
+                        dim.dimension_code === overall?.limiting_dimension && "font-semibold",
+                      )}
+                    >
+                      {dim.dimension_name}
+                    </TableCell>
+                    <TableCell className="num text-right text-muted-foreground">
+                      {fmtNumber(dim.weight_pct)}%
+                    </TableCell>
+                    <TableCell className="num text-right">{fmtNumber(dim.score_pct)}</TableCell>
+                    <TableCell className="num text-right text-muted-foreground">
+                      {fmtDate(dim.assessed_on)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </QueryState>
+    </Panel>
+  );
+}
+
+/**
+ * Completed transfers that resemble this one, and how they turned out.
+ *
+ * The match chips are the reason this is worth showing rather than an embedding
+ * lookup: a manager who disagrees that a Kulim transfer is comparable to a
+ * Melaka one can see exactly which factors were counted and argue with them.
+ * "It is nearby in vector space" ends that conversation instead of starting it.
+ */
+function SimilarTransfersPanel({ projectId }: { projectId: string }) {
+  const query = useQuery(similarQuery(projectId, 5));
+  const rows = query.data?.similar ?? [];
+  const outcome = query.data?.outcome;
+
+  return (
+    <Panel
+      title="Similar historical transfers"
+      description="Scored on transfer type, complexity, portfolio and route — deterministically, so the match can be questioned."
+      envelope={query.data}
+    >
+      <QueryState
+        isLoading={query.isLoading}
+        error={query.error}
+        isEmpty={rows.length === 0}
+        emptyMessage="No completed transfer in scope resembles this one closely enough to compare."
+        onRetry={() => void query.refetch()}
+      >
+        <div className="space-y-4">
+          {outcome?.n ? (
+            <p className="text-sm leading-6 text-muted-foreground">
+              Across the <span className="num">{fmtNumber(outcome.n)}</span> closest completed
+              transfers, the median finished{" "}
+              <span className="num font-medium text-foreground">
+                {fmtDays(outcome.median_variance_days)}
+              </span>{" "}
+              against baseline, with a median cycle time of{" "}
+              <span className="num">{fmtNumber(outcome.median_cycle_time_days)}</span> days and an
+              on-time rate of <span className="num">{fmtPercent(outcome.on_time_rate)}</span>.
+            </p>
+          ) : null}
+
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Transfer</TableHead>
+                <TableHead className="text-right">Match</TableHead>
+                <TableHead>Matched on</TableHead>
+                <TableHead className="text-right">Cycle</TableHead>
+                <TableHead className="text-right">Variance</TableHead>
+                <TableHead>Outcome</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row) => (
+                <TableRow key={row.similar_project_id}>
+                  <TableCell>
+                    <Link
+                      to="/projects/$projectId"
+                      params={{ projectId: row.similar_project_id }}
+                      className="num font-medium text-primary hover:underline"
+                    >
+                      {row.similar_project_id}
+                    </Link>
+                    <div className="text-xs text-muted-foreground">
+                      {row.source_site} → {row.target_site}
+                    </div>
+                  </TableCell>
+                  <TableCell className="num text-right font-semibold">
+                    {fmtNumber(row.similarity_pct)}%
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {row.match_transfer_type ? <Badge variant="muted">type</Badge> : null}
+                      {row.match_complexity ? <Badge variant="muted">complexity</Badge> : null}
+                      {row.match_portfolio ? <Badge variant="muted">portfolio</Badge> : null}
+                      {row.match_source_site ? <Badge variant="muted">source</Badge> : null}
+                      {row.match_target_site ? <Badge variant="muted">target</Badge> : null}
+                    </div>
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {fmtNumber(row.actual_cycle_time_days)} d
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {fmtDays(row.completion_variance_days)}
+                  </TableCell>
+                  <TableCell>
+                    <Badge dot variant={row.on_time ? "ok" : "bad"}>
+                      {row.on_time ? "On time" : "Late"}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </QueryState>
+    </Panel>
   );
 }

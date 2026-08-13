@@ -6,7 +6,8 @@ export
 endif
 
 .PHONY: install data build test test-pg test-all ingest test-legacy test-api test-agent test-auth \
-        test-rbac test-sec test-bi test-obs test-dags test-rag test-k8s dataset image \
+        test-rbac test-sec test-bi test-obs test-dags test-rag test-k8s test-readiness \
+        test-mart test-ai test-web dataset image \
         k8s-up rag-up api agent dash evals pg-up pg-build sso-up obs-up down clean
 
 install:      ## install python deps
@@ -22,6 +23,7 @@ test:         ## server-free gates: golden, governance, marts, AI, console, DAGs
 	python tests/golden_projects.py
 	python tests/governance_checks.py
 	python tests/mart_checks.py
+	python tests/readiness_checks.py
 	python tests/legacy_reconciliation.py
 	python tests/ai_checks.py
 	python tests/web_checks.py
@@ -72,6 +74,9 @@ test-k8s:     ## manifests parse, probe, limit and lock down
 
 test-mart:    ## the console's rollups agree with the metric layer
 	python tests/mart_checks.py
+
+test-readiness: ## readiness weighting, lane re-graining and similarity scoring
+	python tests/readiness_checks.py
 
 test-ai:      ## the AI layer stays inside its fence (no model needed)
 	python tests/ai_checks.py

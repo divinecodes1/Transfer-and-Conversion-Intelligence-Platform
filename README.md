@@ -226,10 +226,14 @@ Credentials, registration, verification and recovery remain on the branded
 Keycloak pages. The same theme covers every step, including dark mode. Self-
 registration proves email ownership; it does not grant portfolio access.
 
-Twelve screens. Overview leads with the management numbers and an
+Fourteen screens. Overview leads with the management numbers and an
 evidence-backed briefing; Projects is a searchable register with explainable
 delay-risk scores; project detail plots every preserved replan against the frozen
-baseline; Distribution and Forecast carry the box plots and the horizon curve;
+baseline, and carries the transfer's readiness breakdown and its closest completed
+precedents; Readiness ranks in-flight work by weighted preparedness, worst first,
+and names the dimension constraining the portfolio; Network re-grains the same
+governed metrics onto each source→target lane and identifies the stage that costs
+that lane the most time; Distribution and Forecast carry the box plots and the horizon curve;
 Reports produces print and CSV output plus audience-aware email drafts; Ask is a
 full-page workbench over the same catalogue-bound answers; Catalogue is
 `tr_gov.metric_definition`, rendered. Four screens are admin-only — Ingestion,
@@ -543,7 +547,8 @@ transfer-and-conversion-intelligence-platform/
 │   ├── 09_entitlements.sql   # roles vs data entitlements (portable)
 │   ├── 10_rls.sql            # row-level enforcement + reader role (PostgreSQL)
 │   ├── 11_observability.sql  # etl_run + agent_audit, survive rebuilds
-│   └── 12_ai.sql             # tr_ai: cached narratives, risk scores, run log
+│   ├── 12_ai.sql             # tr_ai: cached narratives, risk scores, run log
+│   └── 13_readiness_network.sql # readiness weighting · lane re-grain · similarity
 ├── etl/
 │   ├── generate_data.py      # synthetic transfer portfolio + full history
 │   ├── run.py                # bulk loader (duckdb | postgres) — deploys
@@ -574,7 +579,7 @@ transfer-and-conversion-intelligence-platform/
 │   └── static/               # index.html · app.css (design tokens)
 │                             # charts.js (hand-built SVG) · app.js (two views)
 ├── web/                      # the React product console (built, not shipped in the image)
-│   ├── src/routes/           # twelve screens; four admin-only
+│   ├── src/routes/           # fourteen screens; four admin-only
 │   ├── src/lib/              # typed API client · mart queries · AI client · app state
 │   ├── src/components/       # shell · charts · panels · AI surfaces · ui primitives
 │   └── src/styles.css        # the only file holding a colour value
@@ -600,6 +605,7 @@ transfer-and-conversion-intelligence-platform/
 │   ├── governance_checks.py  # reconciliation gate (definitions)
 │   ├── api_checks.py         # API contract gate
 │   ├── mart_checks.py        # the console's rollups agree with the metric layer
+│   ├── readiness_checks.py   # readiness weighting · lane re-grain · similarity
 │   ├── bi_checks.py          # BI holds no SQL, no credentials, no baked definitions
 │   ├── web_checks.py         # the console holds none of it either
 │   ├── ai_checks.py          # the AI fence — asserted without a model
@@ -638,6 +644,7 @@ One sequence, shared with [docs/PLAN.md](docs/PLAN.md).
 | 10 | Portable staging on both engines, Airflow DAG, GitHub Actions CI | **done** |
 | 11 | Semantic knowledge base, fine-tuning experiment, containers + Kubernetes | **done** |
 | 12 | Fenced AI layer (`tr_ai`, `/ai/*`) and the React product console | **done** |
+| 13 | Transfer readiness, network intelligence and historical similarity | **done** |
 
 ## Test suites
 
@@ -646,8 +653,9 @@ One sequence, shared with [docs/PLAN.md](docs/PLAN.md).
 | `golden_projects` | 31 projects, 11 categories, independently recomputed | 38 |
 | `governance_checks` | catalogue ↔ calculation layer agree | 4 |
 | `mart_checks` | the console's rollups agree with the metric layer | 9 |
+| `readiness_checks` | readiness weighting, lane re-graining and similarity, each recomputed | 13 |
 | `legacy_reconciliation` | v0-legacy reproduces v1's numbers, and contradicts itself | 10 |
-| `ai_checks` | the AI fence — closed tool list, merged filters, no metric leak | 12 |
+| `ai_checks` | the AI fence — closed tool list, merged filters, no metric leak | 13 |
 | `web_checks` | the console holds no SQL, credentials, definitions or thresholds | 7 |
 | `orchestration_checks` | DAG parses, delegates, and gates the run | 5 |
 | `k8s_checks` | manifests parse, probe, limit and lock down | 9 |

@@ -285,3 +285,31 @@ export function HealthBadge({ health }: { health: keyof typeof HEALTH_VARIANT })
     </Badge>
   );
 }
+
+// ---- Readiness band --------------------------------------------------------
+const READINESS_VARIANT = {
+  READY: "ok",
+  AT_RISK: "warn",
+  NOT_READY: "bad",
+} as const;
+
+const READINESS_LABEL = {
+  READY: "Ready",
+  AT_RISK: "At risk",
+  NOT_READY: "Not ready",
+} as const;
+
+/**
+ * The readiness band. Same contract as HealthBadge: the boundaries live in
+ * sql/13_readiness_network.sql and this only turns the band the API already
+ * decided into a label and a dot. Nothing here compares a score to a number —
+ * the moment it did, there would be two definitions of "ready" and the SQL one
+ * would be the one nobody reads.
+ */
+export function ReadinessBadge({ band }: { band: keyof typeof READINESS_VARIANT }) {
+  return (
+    <Badge dot variant={READINESS_VARIANT[band] ?? "muted"}>
+      {READINESS_LABEL[band] ?? band}
+    </Badge>
+  );
+}

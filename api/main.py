@@ -786,6 +786,248 @@ def mart_filter_options():
     return {"data_as_of": db.data_as_of(), "options": options}
 
 
+# ---- Readiness, network and similarity ------------------------------------
+# Three capabilities, one rule, unchanged: this module selects, it never
+# computes. Every number below is a column of a view in sql/13, so the readiness
+# weighting, the band boundaries and the similarity weights are all things a
+# reader can find in one file rather than reconstruct from Python.
+
+READINESS_REGISTER = "tr_mart.mart_readiness_register"
+
+# Readiness deliberately has no fiscal_year filter: it only exists for work that
+# has not completed, so filtering it by completion year would return an empty
+# screen and read as a bug rather than a category error.
+READINESS_FILTERS = {
+    "transfer_type": "transfer_type",
+    "portfolio": "portfolio",
+    "complexity": "complexity_class",
+    "status": "status",
+    "band": "readiness_band",
+    "source_site": "source_site",
+    "target_site": "target_site",
+}
+
+READINESS_METRICS = ["TRANSFER_READINESS_SCORE", "READINESS_DIMENSION_SCORE"]
+NETWORK_METRICS = ["ACTUAL_TRANSFER_CYCLE_TIME", "ON_TIME_COMPLETION_RATE",
+                   "BASELINE_FINISH_DEVIATION_DAYS", "TRANSFER_READINESS_SCORE",
+                   "ROUTE_BOTTLENECK_STAGE"]
+SIMILARITY_METRICS = ["TRANSFER_SIMILARITY_SCORE", "ACTUAL_TRANSFER_CYCLE_TIME",
+                      "COMPLETION_VARIANCE_DAYS"]
+
+
+def _readiness_where(filters, site=None):
+    """As `_mart_where`, over the readiness vocabulary. Values bind; keys never."""
+    spec = {READINESS_FILTERS[k]: v for k, v in filters.items()
+            if k in READINESS_FILTERS and v is not None}
+    body, params = db.where(spec)
+    if site:
+        body = f"({body}) AND (source_site = %s OR target_site = %s)"
+        params = params + [site, site]
+    return body, params
+
+
+@app.get("/readiness", tags=["readiness"])
+def readiness(
+    site: str | None = None,
+    transfer_type: str | None = None,
+    portfolio: str | None = None,
+    complexity: str | None = None,
+    status: str | None = None,
+    band: str | None = None,
+    limit: int = Query(200, ge=1, le=1000),
+):
+    """
+    Transfer readiness for the in-flight portfolio, worst first.
+
+    Ordered ascending on purpose: this screen exists to answer "where does
+    management need to act?", and a list that opens on the healthiest transfers
+    answers a question nobody asked.
+    """
+    filters = {"transfer_type": transfer_type, "portfolio": portfolio,
+               "complexity": complexity, "status": status, "band": band}
+    body, params = _readiness_where(filters, site)
+
+    summary = db.fetch_one(
+        f"""
+        SELECT COUNT(*)                                        AS projects,
+               AVG(readiness_pct)                              AS avg_readiness_pct,
+               COUNT(*) FILTER (WHERE readiness_band = 'READY')     AS ready_count,
+               COUNT(*) FILTER (WHERE readiness_band = 'AT_RISK')   AS at_risk_count,
+               COUNT(*) FILTER (WHERE readiness_band = 'NOT_READY') AS not_ready_count,
+               -- Assessment age is the honesty column: a readiness score nobody
+               -- has revisited in four months is not evidence about today.
+               AVG(assessment_age_days)                        AS avg_assessment_age_days
+        FROM   {READINESS_REGISTER} WHERE {body}
+        """, params)
+
+    rows = db.fetch(
+        f"SELECT * FROM {READINESS_REGISTER} WHERE {body} "
+        f"ORDER BY readiness_pct ASC, project_id LIMIT %s", params + [limit])
+
+    return {
+        **catalogue.provenance(READINESS_METRICS, _applied(filters, site),
+                               n=(summary or {}).get("projects", 0)),
+        "summary": summary or {},
+        "projects": rows,
+    }
+
+
+@app.get("/readiness/dimensions", tags=["readiness"])
+def readiness_dimensions(
+    site: str | None = None,
+    transfer_type: str | None = None,
+    portfolio: str | None = None,
+    complexity: str | None = None,
+):
+    """
+    Portfolio readiness broken down by dimension, weakest first.
+
+    This is what makes "qualification is the bottleneck" a number rather than an
+    assertion: the weakest dimension across the whole in-flight portfolio is read
+    off the same rows that score each individual project.
+    """
+    filters = {"transfer_type": transfer_type, "portfolio": portfolio,
+               "complexity": complexity}
+    spec = {READINESS_FILTERS[k]: v for k, v in filters.items()
+            if k in READINESS_FILTERS and v is not None}
+    body, params = db.where(spec)
+    if site:
+        body = f"({body}) AND (source_site = %s OR target_site = %s)"
+        params = params + [site, site]
+
+    rows = db.fetch(
+        f"""
+        SELECT dimension_code, dimension_name, weight_pct, sequence_no,
+               AVG(score_pct)                          AS avg_score_pct,
+               MIN(score_pct)                          AS min_score_pct,
+               COUNT(*)                                AS projects,
+               COUNT(*) FILTER (WHERE score_pct < 70)  AS below_70
+        FROM   tr_mart.mart_readiness_dimension
+        WHERE  {body}
+        GROUP  BY dimension_code, dimension_name, weight_pct, sequence_no
+        ORDER  BY avg_score_pct ASC
+        """, params)
+
+    return {
+        **catalogue.provenance(READINESS_METRICS, _applied(filters, site)),
+        "dimensions": rows,
+    }
+
+
+@app.get("/network", tags=["network"])
+def network(min_transfers: int = Query(1, ge=1, le=100)):
+    """
+    The site-to-site transfer network: one row per lane, plus per-site totals.
+
+    Every lane figure is an existing registered metric re-grained onto the route
+    -- no new definition of "on time" appears here just because the question is
+    now about a lane rather than a project.
+    """
+    lanes = db.fetch(
+        "SELECT * FROM tr_mart.mart_transfer_network "
+        "WHERE total_transfers >= %s "
+        "ORDER BY total_transfers DESC, source_site, target_site", [min_transfers])
+    sites = db.fetch(
+        "SELECT site, direction, transfers, active_transfers "
+        "FROM tr_mart.mart_site_flow ORDER BY site, direction")
+    return {
+        **catalogue.provenance(NETWORK_METRICS, {"min_transfers": min_transfers},
+                               n=len(lanes)),
+        "lanes": lanes,
+        "sites": sites,
+    }
+
+
+@app.get("/projects/{project_id}/readiness", tags=["readiness"])
+def project_readiness(project_id: str):
+    """One project's readiness, dimension by dimension, with the weights applied."""
+    overall = db.fetch_one(
+        f"SELECT * FROM {READINESS_REGISTER} WHERE project_id = %s", [project_id])
+    if overall is None:
+        # A completed or cancelled project is not an error, it is a project that
+        # legitimately has no readiness -- so say which, rather than 404-ing on a
+        # project the caller can plainly see elsewhere in the console.
+        exists = db.fetch_one(
+            "SELECT status FROM tr_core.dim_project WHERE project_id = %s", [project_id])
+        if exists is None:
+            raise HTTPException(status_code=404, detail=f"no project {project_id}")
+        return {
+            **catalogue.provenance(READINESS_METRICS, {"project_id": project_id}),
+            "assessed": False,
+            "reason": f"readiness is assessed for in-flight transfers; "
+                      f"{project_id} is {exists['status']}",
+            "overall": None,
+            "dimensions": [],
+        }
+
+    return {
+        **catalogue.provenance(READINESS_METRICS, {"project_id": project_id}),
+        "assessed": True,
+        "overall": overall,
+        "dimensions": db.fetch(
+            "SELECT dimension_code, dimension_name, weight_pct, sequence_no, "
+            "       score_pct, assessed_on "
+            "FROM   tr_metric.v_project_readiness_dimension "
+            "WHERE  project_id = %s ORDER BY sequence_no", [project_id]),
+    }
+
+
+@app.get("/projects/{project_id}/similar", tags=["similarity"])
+def project_similar(
+    project_id: str,
+    limit: int = Query(5, ge=1, le=25),
+    min_similarity: int = Query(50, ge=0, le=100),
+):
+    """
+    Completed transfers that resemble this one, and what happened to them.
+
+    The outcome summary is the payload: three similar transfers that each ran
+    twelve days over is a pattern worth acting on, and a similarity score with no
+    outcome attached is trivia. Both halves travel together for that reason.
+    """
+    key = db.fetch_one(
+        "SELECT project_key, status FROM tr_core.dim_project WHERE project_id = %s",
+        [project_id])
+    if key is None:
+        raise HTTPException(status_code=404, detail=f"no project {project_id}")
+
+    rows = db.fetch(
+        "SELECT * FROM tr_mart.mart_similar_transfers "
+        "WHERE project_key = %s AND similarity_pct >= %s "
+        "ORDER BY similarity_pct DESC, similar_project_id LIMIT %s",
+        [key["project_key"], min_similarity, limit])
+
+    # Computed over the returned neighbours, not over the whole history: the
+    # summary has to describe the cases actually shown, or the console displays
+    # three projects beside a median drawn from thirty.
+    outcome = db.fetch_one(
+        """
+        SELECT COUNT(*)                                   AS n,
+               PERCENTILE_CONT(0.50) WITHIN GROUP (
+                   ORDER BY completion_variance_days)     AS median_variance_days,
+               PERCENTILE_CONT(0.50) WITHIN GROUP (
+                   ORDER BY actual_cycle_time_days)       AS median_cycle_time_days,
+               100.0 * COUNT(*) FILTER (WHERE on_time)
+                     / NULLIF(COUNT(*) FILTER (WHERE on_time IS NOT NULL), 0)
+                                                          AS on_time_rate
+        FROM (
+            SELECT * FROM tr_mart.mart_similar_transfers
+            WHERE project_key = %s AND similarity_pct >= %s
+            ORDER BY similarity_pct DESC, similar_project_id LIMIT %s
+        ) s
+        """, [key["project_key"], min_similarity, limit])
+
+    return {
+        **catalogue.provenance(SIMILARITY_METRICS,
+                               {"project_id": project_id,
+                                "min_similarity": min_similarity},
+                               n=len(rows)),
+        "reference_status": key["status"],
+        "outcome": outcome or {},
+        "similar": rows,
+    }
+
+
 @app.get("/projects/{project_id}", tags=["projects"])
 def project_detail(project_id: str):
     """
