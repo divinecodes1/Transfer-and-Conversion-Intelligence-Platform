@@ -4,14 +4,36 @@ import { cn } from "@/lib/utils";
 /**
  * Every chart in this console ships with a table beside it, so no value is
  * reachable only by hovering. That rule is why this primitive exists at all.
+ *
+ * Geometry follows the portal spec: a 44px header, 48px rows, 14px body text,
+ * horizontal rules only, and no zebra striping. Vertical borders and alternating
+ * fills both add ink that carries no information — on a register of two hundred
+ * transfers they turn a scan into a search.
  */
-export const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
-  ({ className, ...props }, ref) => (
-    <div className="relative w-full overflow-x-auto">
-      <table ref={ref} className={cn("w-full caption-bottom text-sm", className)} {...props} />
-    </div>
-  ),
-);
+export const Table = React.forwardRef<
+  HTMLTableElement,
+  React.HTMLAttributes<HTMLTableElement> & {
+    /**
+     * Cap the body height so the header can pin while the rows scroll.
+     *
+     * Off by default, and that is deliberate: the wrapper below sets
+     * `overflow-x-auto`, and CSS computes `overflow-y` to `auto` alongside it —
+     * so the wrapper is always a scroll container. Without a height limit it
+     * never actually scrolls, and a sticky header inside it silently does
+     * nothing. Passing a height is what makes the stickiness real.
+     */
+    maxHeight?: string;
+  }
+>(({ className, maxHeight, ...props }, ref) => (
+  <div
+    className={cn("relative w-full overflow-auto", maxHeight)}
+    // A tall scrollable region is a focus target for keyboard users, who
+    // otherwise cannot reach rows below the fold without a mouse.
+    tabIndex={maxHeight ? 0 : undefined}
+  >
+    <table ref={ref} className={cn("w-full caption-bottom text-sm", className)} {...props} />
+  </div>
+));
 Table.displayName = "Table";
 
 export const TableHeader = React.forwardRef<
@@ -36,7 +58,16 @@ export const TableRow = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <tr
     ref={ref}
-    className={cn("border-b border-border transition-colors hover:bg-muted/50", className)}
+    className={cn(
+      "border-b border-border transition-colors",
+      // A whisper on hover. The row the pointer is on should be findable
+      // without the table looking like it is highlighting a selection.
+      "hover:bg-muted/50",
+      // Selection is a stronger, teal-tinted state so the two never read as
+      // the same thing. Set by callers via data-state="selected".
+      "data-[state=selected]:bg-primary-050",
+      className,
+    )}
     {...props}
   />
 ));
@@ -49,7 +80,12 @@ export const TableHead = React.forwardRef<
   <th
     ref={ref}
     className={cn(
-      "h-9 whitespace-nowrap px-3 text-left align-middle text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground",
+      "h-11 whitespace-nowrap px-3 text-left align-middle",
+      "text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground",
+      // Pins to the top of the scroll container when the Table has a
+      // maxHeight, and is inert otherwise. An opaque background is required:
+      // without it the rows scroll visibly underneath the header text.
+      "sticky top-0 z-10 bg-surface",
       className,
     )}
     {...props}
@@ -61,7 +97,10 @@ export const TableCell = React.forwardRef<
   HTMLTableCellElement,
   React.TdHTMLAttributes<HTMLTableCellElement>
 >(({ className, ...props }, ref) => (
-  <td ref={ref} className={cn("px-3 py-2 align-middle", className)} {...props} />
+  // py-3.5 against a 20px line box gives a 48px row — the low end of the
+  // specified 48-56, chosen because these tables are read in long columns
+  // rather than skimmed a few rows at a time.
+  <td ref={ref} className={cn("px-3 py-3.5 align-middle", className)} {...props} />
 ));
 TableCell.displayName = "TableCell";
 

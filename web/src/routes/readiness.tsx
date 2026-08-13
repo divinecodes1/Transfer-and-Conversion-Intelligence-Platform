@@ -192,60 +192,58 @@ export function ReadinessScreen() {
           emptyMessage="No in-flight transfers in this scope."
           onRetry={() => void register.refetch()}
         >
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Transfer</TableHead>
-                  <TableHead>Route</TableHead>
-                  <TableHead className="text-right">Readiness</TableHead>
-                  <TableHead>Band</TableHead>
-                  <TableHead>Limiting dimension</TableHead>
-                  <TableHead className="text-right">Drift</TableHead>
-                  <TableHead className="text-right">Assessed</TableHead>
+          <Table maxHeight="max-h-[calc(100vh-22rem)]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Transfer</TableHead>
+                <TableHead>Route</TableHead>
+                <TableHead className="text-right">Readiness</TableHead>
+                <TableHead>Band</TableHead>
+                <TableHead>Limiting dimension</TableHead>
+                <TableHead className="text-right">Drift</TableHead>
+                <TableHead className="text-right">Assessed</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row) => (
+                <TableRow key={row.project_id}>
+                  <TableCell>
+                    <Link
+                      to="/projects/$projectId"
+                      params={{ projectId: row.project_id }}
+                      className="num font-medium text-primary hover:underline"
+                    >
+                      {row.project_id}
+                    </Link>
+                    <div className="text-xs text-muted-foreground">{row.project_name}</div>
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {row.source_site} → {row.target_site}
+                  </TableCell>
+                  <TableCell className="num text-right font-semibold">
+                    {fmtPercent(row.readiness_pct)}
+                  </TableCell>
+                  <TableCell>
+                    <ReadinessBadge band={row.readiness_band} />
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {row.limiting_dimension_name ?? "—"}
+                    {row.limiting_score !== null ? (
+                      <span className="num ml-1 text-muted-foreground">
+                        ({fmtNumber(row.limiting_score)})
+                      </span>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="num text-right text-muted-foreground">
+                    {fmtDays(row.schedule_deviation_days)}
+                  </TableCell>
+                  <TableCell className="num text-right text-muted-foreground">
+                    {fmtNumber(row.assessment_age_days)}d ago
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.project_id}>
-                    <TableCell>
-                      <Link
-                        to="/projects/$projectId"
-                        params={{ projectId: row.project_id }}
-                        className="num font-medium text-primary hover:underline"
-                      >
-                        {row.project_id}
-                      </Link>
-                      <div className="text-xs text-muted-foreground">{row.project_name}</div>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {row.source_site} → {row.target_site}
-                    </TableCell>
-                    <TableCell className="num text-right font-semibold">
-                      {fmtPercent(row.readiness_pct)}
-                    </TableCell>
-                    <TableCell>
-                      <ReadinessBadge band={row.readiness_band} />
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {row.limiting_dimension_name ?? "—"}
-                      {row.limiting_score !== null ? (
-                        <span className="num ml-1 text-muted-foreground">
-                          ({fmtNumber(row.limiting_score)})
-                        </span>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="num text-right text-muted-foreground">
-                      {fmtDays(row.schedule_deviation_days)}
-                    </TableCell>
-                    <TableCell className="num text-right text-muted-foreground">
-                      {fmtNumber(row.assessment_age_days)}d ago
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+              ))}
+            </TableBody>
+          </Table>
         </QueryState>
       </Panel>
     </div>

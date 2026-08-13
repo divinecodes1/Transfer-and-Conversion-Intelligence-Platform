@@ -134,7 +134,18 @@ export function Provenance({
   const metrics = envelope.metrics ?? [];
 
   return (
-    <div className={cn("mt-3 border-t border-border pt-2 text-xs", className)}>
+    // A full-bleed foot rather than an indented paragraph.
+    //
+    // The negative margins pull it to the card's edges through CardContent's
+    // padding, so provenance reads as a band belonging to the panel — the same
+    // separation the reference design gives its "Source / Updated" line. Metadata
+    // set in the content column reads as content, and gets skimmed as content.
+    <div
+      className={cn(
+        "-mx-4 -mb-4 mt-3 border-t border-border bg-muted/40 px-4 py-2 text-xs",
+        className,
+      )}
+    >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
         <button
           type="button"

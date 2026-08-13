@@ -140,61 +140,59 @@ export function NetworkScreen() {
           emptyMessage="No lane in this scope carries enough transfers to summarise."
           onRetry={() => void query.refetch()}
         >
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Lane</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead className="text-right">Active</TableHead>
-                  <TableHead className="text-right">Median lead</TableHead>
-                  <TableHead className="text-right">On time</TableHead>
-                  <TableHead className="text-right">Readiness</TableHead>
-                  <TableHead>Bottleneck</TableHead>
-                  <TableHead />
+          <Table maxHeight="max-h-[calc(100vh-22rem)]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Lane</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+                <TableHead className="text-right">Active</TableHead>
+                <TableHead className="text-right">Median lead</TableHead>
+                <TableHead className="text-right">On time</TableHead>
+                <TableHead className="text-right">Readiness</TableHead>
+                <TableHead>Bottleneck</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {lanes.map((lane) => (
+                <TableRow
+                  key={laneKey(lane)}
+                  data-state={laneKey(lane) === laneKey(selected!) ? "selected" : undefined}
+                >
+                  <TableCell className="font-medium">
+                    <span className="inline-flex items-center gap-1.5">
+                      {lane.source_site}
+                      <ArrowRight className="size-3.5 text-muted-foreground" />
+                      {lane.target_site}
+                    </span>
+                  </TableCell>
+                  <TableCell className="num text-right">{fmtNumber(lane.total_transfers)}</TableCell>
+                  <TableCell className="num text-right text-muted-foreground">
+                    {fmtNumber(lane.active_transfers)}
+                  </TableCell>
+                  <TableCell className="num text-right">
+                    {fmtNumber(lane.median_lead_time_days)} d
+                  </TableCell>
+                  <TableCell className="num text-right">{fmtPercent(lane.on_time_rate)}</TableCell>
+                  <TableCell className="num text-right">
+                    {fmtPercent(lane.avg_readiness_pct)}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {lane.bottleneck_stage ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSelectedKey(laneKey(lane))}
+                    >
+                      View
+                    </Button>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {lanes.map((lane) => (
-                  <TableRow
-                    key={laneKey(lane)}
-                    data-state={laneKey(lane) === laneKey(selected!) ? "selected" : undefined}
-                  >
-                    <TableCell className="font-medium">
-                      <span className="inline-flex items-center gap-1.5">
-                        {lane.source_site}
-                        <ArrowRight className="size-3.5 text-muted-foreground" />
-                        {lane.target_site}
-                      </span>
-                    </TableCell>
-                    <TableCell className="num text-right">{fmtNumber(lane.total_transfers)}</TableCell>
-                    <TableCell className="num text-right text-muted-foreground">
-                      {fmtNumber(lane.active_transfers)}
-                    </TableCell>
-                    <TableCell className="num text-right">
-                      {fmtNumber(lane.median_lead_time_days)} d
-                    </TableCell>
-                    <TableCell className="num text-right">{fmtPercent(lane.on_time_rate)}</TableCell>
-                    <TableCell className="num text-right">
-                      {fmtPercent(lane.avg_readiness_pct)}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {lane.bottleneck_stage ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setSelectedKey(laneKey(lane))}
-                      >
-                        View
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+              ))}
+            </TableBody>
+          </Table>
         </QueryState>
       </Panel>
 
@@ -209,30 +207,28 @@ export function NetworkScreen() {
           isEmpty={bySite.length === 0}
           onRetry={() => void query.refetch()}
         >
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Site</TableHead>
-                  <TableHead className="text-right">Inbound</TableHead>
-                  <TableHead className="text-right">Outbound</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Site</TableHead>
+                <TableHead className="text-right">Inbound</TableHead>
+                <TableHead className="text-right">Outbound</TableHead>
+                <TableHead className="text-right">Total</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {bySite.map((row) => (
+                <TableRow key={row.site}>
+                  <TableCell className="font-medium">{row.site}</TableCell>
+                  <TableCell className="num text-right">{fmtNumber(row.inbound)}</TableCell>
+                  <TableCell className="num text-right">{fmtNumber(row.outbound)}</TableCell>
+                  <TableCell className="num text-right font-semibold">
+                    {fmtNumber(row.inbound + row.outbound)}
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {bySite.map((row) => (
-                  <TableRow key={row.site}>
-                    <TableCell className="font-medium">{row.site}</TableCell>
-                    <TableCell className="num text-right">{fmtNumber(row.inbound)}</TableCell>
-                    <TableCell className="num text-right">{fmtNumber(row.outbound)}</TableCell>
-                    <TableCell className="num text-right font-semibold">
-                      {fmtNumber(row.inbound + row.outbound)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+              ))}
+            </TableBody>
+          </Table>
         </QueryState>
       </Panel>
     </div>

@@ -117,7 +117,7 @@ export function ProjectsScreen() {
           onRetry={() => void query.refetch()}
           rows={8}
         >
-          <Table>
+          <Table maxHeight="max-h-[calc(100vh-22rem)]">
             <TableHeader className="border-t border-border bg-card">
               <TableRow>
                 {COLUMNS.map((column) => (
