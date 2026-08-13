@@ -342,7 +342,12 @@ jobs:
         run: |
           set -euo pipefail
           [ -n "$API_URL" ] || { echo "AWS_API_URL not set; skipping"; exit 0; }
-          URL="${API_URL%/}/health"
+          # /healthz, not /health: /health resolves an identity and refuses an
+          # anonymous caller under enforce, so this loop would retry 12 times and
+          # then fail against a perfectly healthy deployment. The row count it
+          # used to prove is asserted at the warehouse load above, where
+          # credentials already exist.
+          URL="${API_URL%/}/healthz"
           for attempt in $(seq 1 12); do
             body=$(curl -s --max-time 25 -w '\n%{http_code}' "$URL" || true)
             code=$(printf '%s' "$body" | tail -n1)
