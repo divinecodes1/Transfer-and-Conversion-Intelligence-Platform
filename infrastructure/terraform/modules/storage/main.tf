@@ -40,6 +40,16 @@ resource "azurerm_storage_account" "this" {
   tags = var.tags
 }
 
+# The Vite console is a static SPA. Hosting it on the storage web endpoint keeps
+# the student deployment inside regions permitted by Azure subscription policy
+# and avoids another standing service. Sending 404s to index.html preserves
+# client-side routing for direct links such as /distribution.
+resource "azurerm_storage_account_static_website" "web" {
+  storage_account_id = azurerm_storage_account.this.id
+  index_document     = "index.html"
+  error_404_document = "index.html"
+}
+
 resource "azurerm_storage_container" "containers" {
   for_each = toset([
     "transfer-documents",
@@ -108,3 +118,4 @@ resource "azurerm_storage_management_policy" "lifecycle" {
 output "account_id" { value = azurerm_storage_account.this.id }
 output "account_name" { value = azurerm_storage_account.this.name }
 output "blob_endpoint" { value = azurerm_storage_account.this.primary_blob_endpoint }
+output "web_endpoint" { value = azurerm_storage_account.this.primary_web_endpoint }

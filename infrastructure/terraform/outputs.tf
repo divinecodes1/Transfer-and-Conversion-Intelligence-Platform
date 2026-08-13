@@ -22,7 +22,7 @@ output "api_url" {
 
 output "web_url" {
   description = "Public HTTPS endpoint of the console."
-  value       = module.container_app.web_url
+  value       = trimsuffix(module.storage.web_endpoint, "/")
 }
 
 output "keycloak_url" {
@@ -115,17 +115,11 @@ output "ai_password" {
   sensitive = true
 }
 
-output "static_web_app_deployment_token" {
-  description = "Set as AZURE_STATIC_WEB_APPS_API_TOKEN in GitHub repository secrets."
-  value       = module.container_app.web_api_key
-  sensitive   = true
-}
-
 # ---- A deployment summary worth reading -------------------------------------
 output "cost_posture" {
   description = "What this stack bills when idle, so the number is visible at apply time."
   value = join("\n", [
-    "Static Web App        Free tier            0.00",
+    "Static website        Storage web endpoint  negligible at demo volume",
     "Container Apps (api)  Consumption, min=${var.api_min_replicas}  ${var.api_min_replicas == 0 ? "0.00 when idle (free grant covers demo load)" : "BILLS CONTINUOUSLY - min_replicas > 0"}",
     "Container Apps (auth) Keycloak, min=${var.keycloak_min_replicas}   ${var.keycloak_min_replicas == 0 ? "0.00 when idle; 40-60s cold start on first sign-in" : "BILLS CONTINUOUSLY - roughly 30-35 USD/month, a third of the student credit"}",
     "Container Apps Job    cron, on-demand      ~0.00",

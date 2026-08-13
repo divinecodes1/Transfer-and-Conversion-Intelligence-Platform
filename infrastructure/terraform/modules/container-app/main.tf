@@ -14,7 +14,7 @@
 variable "environment_name" { type = string }
 variable "api_app_name" { type = string }
 variable "job_name" { type = string }
-variable "static_site_name" { type = string }
+variable "web_origin" { type = string }
 variable "resource_group_name" { type = string }
 variable "location" { type = string }
 variable "tags" { type = map(string) }
@@ -401,7 +401,7 @@ resource "azurerm_container_app" "keycloak" {
       # supplies the value.
       env {
         name  = "TRANSFEROPS_WEB_ORIGIN"
-        value = "https://${azurerm_static_web_app.web.default_host_name}"
+        value = var.web_origin
       }
 
       # The realm's smtpServer block is written with ${KEYCLOAK_SMTP_*}
@@ -546,30 +546,9 @@ resource "azurerm_container_app_job" "refresh" {
   }
 }
 
-# The console. Free tier: 100 GB bandwidth a month and a managed certificate on
-# the default hostname. The build is a Vite SPA -- static files with no server
-# runtime -- so nothing here needs to scale or wake up.
-resource "azurerm_static_web_app" "web" {
-  name                = var.static_site_name
-  resource_group_name = var.resource_group_name
-  # Static Web Apps Free is offered in a subset of regions; westeurope is one.
-  location = var.location
-
-  sku_tier = "Free"
-  sku_size = "Free"
-
-  tags = var.tags
-}
-
 output "api_fqdn" { value = azurerm_container_app.api.ingress[0].fqdn }
 output "api_url" { value = "https://${azurerm_container_app.api.ingress[0].fqdn}" }
 output "keycloak_url" { value = "https://${azurerm_container_app.keycloak.ingress[0].fqdn}" }
 output "keycloak_app_name" { value = azurerm_container_app.keycloak.name }
-output "web_hostname" { value = azurerm_static_web_app.web.default_host_name }
-output "web_url" { value = "https://${azurerm_static_web_app.web.default_host_name}" }
-output "web_api_key" {
-  value     = azurerm_static_web_app.web.api_key
-  sensitive = true
-}
 output "environment_id" { value = azurerm_container_app_environment.this.id }
 output "job_name" { value = azurerm_container_app_job.refresh.name }

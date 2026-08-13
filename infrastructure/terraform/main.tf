@@ -168,7 +168,7 @@ module "container_app" {
   environment_name    = format(local.name_prefix, "cae")
   api_app_name        = format(local.name_prefix, "api")
   job_name            = format(local.name_prefix, "etl")
-  static_site_name    = format(local.name_prefix, "web")
+  web_origin          = trimsuffix(module.storage.web_endpoint, "/")
   resource_group_name = module.resource_group.name
   location            = var.location
   tags                = local.tags

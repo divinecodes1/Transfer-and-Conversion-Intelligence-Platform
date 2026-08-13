@@ -45,6 +45,14 @@ resource "azurerm_role_assignment" "blob" {
   principal_id         = azurerm_user_assigned_identity.this.principal_id
 }
 
+# The authenticated deployer publishes the compiled SPA with `az storage blob
+# upload-batch --auth-mode login`; no storage account key is enabled or exposed.
+resource "azurerm_role_assignment" "deployer_blob" {
+  scope                = var.storage_account_id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = data.azurerm_client_config.current.object_id
+}
+
 resource "azurerm_key_vault" "this" {
   count = var.enable_key_vault ? 1 : 0
 
