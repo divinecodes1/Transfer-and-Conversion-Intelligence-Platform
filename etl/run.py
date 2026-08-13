@@ -25,6 +25,8 @@ CORE_TABLES = {
     "dim_milestone": "tr_core.dim_milestone",
     "dim_fiscal_date": "tr_core.dim_fiscal_date",
     "dim_readiness_dimension": "tr_core.dim_readiness_dimension",
+    "dim_product_line": "tr_core.dim_product_line",
+    "dim_application": "tr_core.dim_application",
     "fact_schedule_revision": "tr_core.fact_schedule_revision",
     "fact_project_snapshot": "tr_core.fact_project_snapshot",
     "fact_milestone_event": "tr_core.fact_milestone_event",
@@ -121,6 +123,23 @@ def data_quality(fetch):
                        "JOIN tr_core.dim_project p USING(project_key) "
                        "WHERE p.status <> 'COMPLETED'") == 0,
                    "population guard holds"))
+    # A project referencing a product line or application that is not in the
+    # catalogue would render as a blank filter option and silently drop out of
+    # every grouped total -- visible as a chart whose bars do not add up to the
+    # headline count, which is exactly the kind of discrepancy nobody traces.
+    checks.append(("every project maps to a catalogued product line",
+                   one("SELECT COUNT(*) FROM tr_core.dim_project p "
+                       "LEFT JOIN tr_core.dim_product_line d "
+                       "  ON d.product_code = p.product_line "
+                       "WHERE d.product_code IS NULL") == 0,
+                   "no orphan product codes"))
+    checks.append(("every project maps to a catalogued application",
+                   one("SELECT COUNT(*) FROM tr_core.dim_project p "
+                       "LEFT JOIN tr_core.dim_application a "
+                       "  ON a.application_code = p.application_segment "
+                       "WHERE a.application_code IS NULL") == 0,
+                   "no orphan application codes"))
+
     # A weight set that sums to anything other than 100 still produces a
     # plausible-looking percentage, which is exactly why it is gated rather than
     # trusted: the readiness score would be wrong and would not look wrong.

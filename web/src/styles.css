@@ -46,6 +46,9 @@
   --color-ring: var(--ring);
   --color-surface: var(--surface);
   --color-grid: var(--grid);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-muted: var(--brand-muted);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-bad: var(--bad);
@@ -65,7 +68,11 @@
 }
 
 :root {
-  --radius: 0.5rem;
+  /* Near-square. The reference design language uses a 2-4px corner throughout --
+     buttons, cards, inputs -- which reads as industrial and precise rather than
+     consumer-soft. 8px was the generic dashboard default and it was the single
+     biggest thing making this look like a different product. */
+  --radius: 0.25rem;
   --background: #f7f7f7;
   --foreground: #111111;
   --surface: #ffffff;
@@ -87,6 +94,13 @@
   --input: #cdd1d5;
   --ring: #0a8276;
   --grid: #e3e5e7;
+
+  /* The brand band: the solid teal footer, and the filled header action.
+     Darker than --primary so a filled control reads as deliberate rather than
+     as an oversized link, and so white text on it clears AA comfortably. */
+  --brand: #076b62;
+  --brand-foreground: #ffffff;
+  --brand-muted: #b9dfda;
 
   /* Reserved status scale. Never used for a data series. */
   --ok: #2e7d32;
@@ -133,6 +147,13 @@
   --input: oklch(0.27 0.015 250);
   --ring: oklch(0.78 0.14 190);
   --grid: oklch(0.28 0.014 250);
+
+  /* In dark mode the band cannot be the light theme's teal -- it would glow
+     against a dark page. It becomes a raised surface with a teal-tinted edge,
+     which is the same structural role played a different way. */
+  --brand: oklch(0.26 0.03 200);
+  --brand-foreground: oklch(0.93 0.01 250);
+  --brand-muted: oklch(0.62 0.09 195);
 
   --ok: oklch(0.76 0.15 160);
   --warn: oklch(0.81 0.15 80);

@@ -145,6 +145,12 @@ GROUP_COLS = {
     "complexity_class": "complexity_class",
     "source_site": "source_site",
     "target_site": "target_site",
+    # What is being moved, and who buys it. Grouped on the display NAME rather
+    # than the code: these are chart axes, and "Battery Management ICs" is the
+    # label a reader needs. The name comes from the catalogue join in
+    # v_project_kpi, so it cannot drift from the code it belongs to.
+    "product_line": "product_name",
+    "application_segment": "application_name",
 }
 
 # Not every source carries every dimension: the forecast-cycle-time view is at
@@ -481,6 +487,12 @@ MART_FILTERS = {
     "health": "health",
     "source_site": "source_site",
     "target_site": "target_site",
+    # Filtered on the CODE, not the name. A code is stable; a display name is
+    # editorial and will be reworded. A saved filter or a bookmarked URL that
+    # binds on "Security & Smart Card Solutions" breaks the day somebody drops
+    # the ampersand.
+    "product_line": "product_line",
+    "application_segment": "application_segment",
 }
 
 
@@ -521,6 +533,8 @@ def mart_kpis(
     transfer_type: str | None = None,
     portfolio: str | None = None,
     complexity: str | None = None,
+    product_line: str | None = None,
+    application_segment: str | None = None,
 ):
     """
     The headline tiles, for one filter scope.
@@ -531,7 +545,9 @@ def mart_kpis(
     by the register table, the risk scorer and this rollup from the one place.
     """
     filters = {"fiscal_year": fiscal_year, "transfer_type": transfer_type,
-               "portfolio": portfolio, "complexity": complexity}
+               "portfolio": portfolio, "complexity": complexity,
+               "product_line": product_line,
+               "application_segment": application_segment}
     body, params = _mart_where(filters, site)
     row = db.fetch_one(
         f"""
@@ -578,13 +594,17 @@ def mart_trend(
     transfer_type: str | None = None,
     portfolio: str | None = None,
     complexity: str | None = None,
+    product_line: str | None = None,
+    application_segment: str | None = None,
 ):
     """Fiscal-year trend: throughput, median cycle time, on-time and replan rate.
 
     Not filtered by fiscal year, by design -- a trend line with one point on it
     is a number wearing a chart's clothes."""
     filters = {"transfer_type": transfer_type, "portfolio": portfolio,
-               "complexity": complexity}
+               "complexity": complexity,
+               "product_line": product_line,
+               "application_segment": application_segment}
     body, params = _mart_where(filters, site)
     rows = db.fetch(
         f"""
@@ -638,13 +658,17 @@ def mart_distribution(
     transfer_type: str | None = None,
     portfolio: str | None = None,
     complexity: str | None = None,
+    product_line: str | None = None,
+    application_segment: str | None = None,
 ):
     """Cycle-time spread per cohort -- the box-plot source, filter-scoped."""
     if group_by not in COHORTS:
         raise HTTPException(status_code=400,
                             detail=f"group_by must be one of {sorted(COHORTS)}")
     filters = {"fiscal_year": fiscal_year, "transfer_type": transfer_type,
-               "portfolio": portfolio, "complexity": complexity}
+               "portfolio": portfolio, "complexity": complexity,
+               "product_line": product_line,
+               "application_segment": application_segment}
     body, params = _mart_where(filters, site)
     rows = db.fetch(
         f"""
@@ -683,6 +707,8 @@ def mart_accuracy(
     transfer_type: str | None = None,
     portfolio: str | None = None,
     complexity: str | None = None,
+    product_line: str | None = None,
+    application_segment: str | None = None,
 ):
     """
     Forecast quality by how far ahead the forecast was made.
@@ -692,7 +718,9 @@ def mart_accuracy(
     curve cannot disagree about what "within 14 days" means.
     """
     filters = {"transfer_type": transfer_type, "portfolio": portfolio,
-               "complexity": complexity}
+               "complexity": complexity,
+               "product_line": product_line,
+               "application_segment": application_segment}
     body, params = _mart_where(filters, site)
     rows = db.fetch(
         f"""
@@ -737,6 +765,8 @@ def mart_projects(
     transfer_type: str | None = None,
     portfolio: str | None = None,
     complexity: str | None = None,
+    product_line: str | None = None,
+    application_segment: str | None = None,
     status: str | None = None,
     health: str | None = None,
     search: str | None = None,
@@ -748,6 +778,8 @@ def mart_projects(
     """The project register: governed rows at project grain, filtered and sorted."""
     filters = {"fiscal_year": fiscal_year, "transfer_type": transfer_type,
                "portfolio": portfolio, "complexity": complexity,
+               "product_line": product_line,
+               "application_segment": application_segment,
                "status": status, "health": health}
     body, params = _mart_where(filters, site)
 
@@ -809,13 +841,22 @@ def mart_filter_options():
     Entitlement-scoped like everything else, which is the useful part: you cannot
     enumerate a portfolio you are not allowed to read, so the dropdown itself
     never leaks the shape of the wider estate.
+
+    Each option is a {value, label} pair. They are identical for most
+    dimensions and differ for the product and application taxonomy, where the
+    filter binds on a stable code but the dropdown shows the catalogue's own
+    display name. Both come from the warehouse so the console never has to
+    prettify a code and become a second naming authority.
+
+    Ordered by label, not value: the reader is scanning names.
     """
     rows = db.fetch(
-        "SELECT dimension, value FROM tr_mart.mart_filter_options "
-        "ORDER BY dimension, value")
+        "SELECT dimension, value, label FROM tr_mart.mart_filter_options "
+        "ORDER BY dimension, label")
     options = {}
     for row in rows:
-        options.setdefault(row["dimension"], []).append(row["value"])
+        options.setdefault(row["dimension"], []).append(
+            {"value": row["value"], "label": row["label"]})
     return {"data_as_of": db.data_as_of(), "options": options}
 
 

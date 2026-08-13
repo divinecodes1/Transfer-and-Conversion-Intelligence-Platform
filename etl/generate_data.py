@@ -47,6 +47,74 @@ MILESTONES = [
 
 TODAY = dt.date(2026, 8, 11)   # "as of" date used for active projects
 
+# ---- Product and application taxonomy ---------------------------------------
+# The catalogue a semiconductor portfolio is actually organised by: what is
+# being moved, and which end market buys it. Written to dim_product_line and
+# dim_application; dim_project stores only the codes.
+PRODUCT_LINES = [
+    ("BATTERY_MGMT",   "Battery Management ICs",         1),
+    ("DESIGN_SUPPORT", "Design Support",                 2),
+    ("ESD_SURGE",      "ESD and Surge Protection",       3),
+    ("ETHERNET",       "Ethernet",                       4),
+    ("EVAL_BOARDS",    "Evaluation Boards",              5),
+    ("HIGH_REL",       "High Reliability",               6),
+    ("ISOLATION",      "Isolation",                      7),
+    ("MEMORIES",       "Memories",                       8),
+    ("MICROCONTROLLER", "Microcontroller",               9),
+    ("POWER",          "Power",                         10),
+    ("RF",             "RF",                            11),
+    ("SECURITY_CARD",  "Security & Smart Card Solutions", 12),
+    ("SENSOR",         "Sensor",                        13),
+    ("TRANSCEIVERS",   "Transceivers",                  14),
+    ("USB",            "Universal Serial Bus",          15),
+    ("WIRELESS",       "Wireless Connectivity",         16),
+]
+
+APPLICATIONS = [
+    ("AEROSPACE_DEFENCE", "Aerospace and Defense",                   1),
+    ("AUTOMOTIVE",        "Automotive",                              2),
+    ("CONSUMER",          "Consumer Electronics",                    3),
+    ("HEALTHCARE",        "Healthcare and Lifestyle",                4),
+    ("HOME_APPLIANCES",   "Home Appliances",                         5),
+    ("INDUSTRIAL",        "Industrial",                              6),
+    ("ICT",               "Information & Communications Technology", 7),
+    ("RENEWABLES",        "Renewables",                              8),
+    ("ROBOTICS",          "Robotics",                                9),
+    ("SECURITY",          "Security Solutions",                     10),
+    ("SMART_HOME",        "Smart Home & Building",                  11),
+    ("SOLUTIONS",         "Solutions",                              12),
+]
+
+# Which product lines and applications each reporting portfolio plausibly moves.
+#
+# Weighted rather than uniform, because a uniform draw would make every
+# portfolio look identical on every breakdown -- the same failure the flat
+# REPLAN_RATE and the constant lane bottleneck had. A portfolio view is only
+# worth building if the portfolios differ.
+#
+# The tail is deliberate too: each portfolio can carry any product line, just
+# rarely, so a "which portfolios touch Memories?" question has a real answer
+# instead of a single row.
+PORTFOLIO_AFFINITY = {
+    "PF_AUTO": {
+        "products": ["MICROCONTROLLER", "POWER", "SENSOR", "TRANSCEIVERS",
+                     "HIGH_REL", "BATTERY_MGMT", "ETHERNET"],
+        "applications": ["AUTOMOTIVE", "ROBOTICS", "INDUSTRIAL", "AEROSPACE_DEFENCE"],
+    },
+    "PF_POWER": {
+        "products": ["POWER", "ISOLATION", "ESD_SURGE", "BATTERY_MGMT",
+                     "HIGH_REL", "EVAL_BOARDS"],
+        "applications": ["RENEWABLES", "INDUSTRIAL", "HOME_APPLIANCES",
+                         "AUTOMOTIVE", "SOLUTIONS"],
+    },
+    "PF_IOT": {
+        "products": ["WIRELESS", "SECURITY_CARD", "MEMORIES", "USB", "RF",
+                     "MICROCONTROLLER", "SENSOR", "DESIGN_SUPPORT"],
+        "applications": ["SMART_HOME", "CONSUMER", "ICT", "SECURITY",
+                         "HEALTHCARE", "SOLUTIONS"],
+    },
+}
+
 # ---- Readiness ------------------------------------------------------------
 # The seven dimensions and their weights. These are written to
 # dim_readiness_dimension and the calculation layer reads them from there --
@@ -273,6 +341,39 @@ def build_history(proj):
     return revisions, snapshots, events
 
 
+def assign_taxonomy(projects):
+    """
+    Give every project a product line and an end-market application.
+
+    Seeded per project key from a private stream, for the same reason readiness
+    is: the main generator's draws stay untouched, so dim_project's existing
+    columns, every history table and the golden gate's hand-agreed numbers are
+    unchanged by adding two dimensions.
+
+    Weighted toward the portfolio's affinity with a long tail, so the portfolios
+    differ from each other without any product line becoming unreachable.
+    """
+    all_products = [code for code, _n, _s in PRODUCT_LINES]
+    all_applications = [code for code, _n, _s in APPLICATIONS]
+
+    for p in projects:
+        rng = random.Random(4200 + p["project_key"])
+        affinity = PORTFOLIO_AFFINITY.get(p["portfolio"], {})
+
+        likely_products = affinity.get("products", all_products)
+        likely_applications = affinity.get("applications", all_applications)
+
+        # 80% from the portfolio's own lines, 20% from anywhere.
+        p["product_line"] = (
+            rng.choice(likely_products) if rng.random() < 0.80
+            else rng.choice(all_products)
+        )
+        p["application_segment"] = (
+            rng.choice(likely_applications) if rng.random() < 0.80
+            else rng.choice(all_applications)
+        )
+
+
 def build_readiness(projects, rng, vintage):
     """
     One readiness row per in-flight project per dimension.
@@ -398,9 +499,22 @@ def main():
         fiscal.append(fiscal_row(cal)); cal += dt.timedelta(days=1)
 
     # write tables
+    # Taxonomy is assigned after the history is built, from its own stream, so
+    # not a single existing value moves.
+    assign_taxonomy(projects)
+
     write_csv("dim_project.csv", projects,
               ["project_key","project_id","project_name","transfer_type","complexity_class",
-               "source_site","target_site","portfolio","status","actual_start","actual_finish"])
+               "source_site","target_site","portfolio","product_line","application_segment",
+               "status","actual_start","actual_finish"])
+    write_csv("dim_product_line.csv",
+              [{"product_code": c, "product_name": n, "sequence_no": s}
+               for c, n, s in PRODUCT_LINES],
+              ["product_code","product_name","sequence_no"])
+    write_csv("dim_application.csv",
+              [{"application_code": c, "application_name": n, "sequence_no": s}
+               for c, n, s in APPLICATIONS],
+              ["application_code","application_name","sequence_no"])
     write_csv("dim_milestone.csv",
               [{"milestone_key": s, "milestone_code": c, "milestone_name": n, "sequence_no": s}
                for c, n, s, _ in MILESTONES],

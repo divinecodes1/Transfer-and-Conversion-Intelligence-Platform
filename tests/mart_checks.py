@@ -114,7 +114,8 @@ def run():
     # ---- 7: filter options are derived ------------------------------------
     dimensions = {row[0] for row in rows("SELECT DISTINCT dimension FROM tr_mart.mart_filter_options")}
     expected_dimensions = {"fiscal_year", "transfer_type", "portfolio", "complexity_class",
-                           "source_site", "target_site", "status", "health"}
+                           "source_site", "target_site", "status", "health",
+                           "product_line", "application_segment"}
     stray = one("""
         SELECT COUNT(*) FROM tr_mart.mart_filter_options o
         WHERE o.dimension = 'portfolio'
@@ -123,6 +124,26 @@ def run():
     results.append(("the filter vocabulary is derived from the data",
                     dimensions == expected_dimensions and stray == 0,
                     f"{len(dimensions)} dimensions, no value that is not in the warehouse"))
+
+    # ---- 7b: every option label comes from the catalogue ------------------
+    # The taxonomy filters bind on a stable code and display the catalogue's
+    # name. If a label ever failed to resolve it would render as an empty
+    # dropdown entry -- selectable, filtering correctly, and unreadable. Worth
+    # gating because the symptom looks like a CSS problem, not a join problem.
+    unlabelled = one("""
+        SELECT COUNT(*) FROM tr_mart.mart_filter_options
+        WHERE label IS NULL OR label = ''""")
+    mislabelled = one("""
+        SELECT COUNT(*) FROM tr_mart.mart_filter_options o
+        WHERE o.dimension = 'product_line'
+          AND o.label NOT IN (SELECT product_name FROM tr_core.dim_product_line)""")
+    mislabelled += one("""
+        SELECT COUNT(*) FROM tr_mart.mart_filter_options o
+        WHERE o.dimension = 'application_segment'
+          AND o.label NOT IN (SELECT application_name FROM tr_core.dim_application)""")
+    results.append(("every filter option carries a catalogued label",
+                    unlabelled == 0 and mislabelled == 0,
+                    f"{unlabelled} blank label(s), {mislabelled} label(s) not in the catalogue"))
 
     # ---- 8: horizon buckets are ordered and consistent --------------------
     ordering = rows("""

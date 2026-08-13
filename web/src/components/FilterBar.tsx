@@ -38,6 +38,10 @@ const DIMENSIONS: Dimension[] = [
   { key: "site", label: "Site", option: "target_site" },
   { key: "transfer_type", label: "Transfer type", option: "transfer_type" },
   { key: "portfolio", label: "Portfolio", option: "portfolio" },
+  // What is being moved, and who buys it. Both bind on a catalogue code and
+  // display the catalogue's own name — see FilterOption in lib/marts.ts.
+  { key: "product_line", label: "Product line", option: "product_line" },
+  { key: "application_segment", label: "Application", option: "application_segment" },
   { key: "complexity", label: "Complexity", option: "complexity_class" },
 ];
 
@@ -50,9 +54,17 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
   // "Site" matches either end of a transfer, so the list is the union of the
   // two — a site lead asking about their own site means work arriving *and*
   // leaving, and offering only targets would silently hide half of it.
+  //
+  // Deduped by value through a Map, not a Set. Options are now {value,label}
+  // objects, and a Set of objects dedupes on identity: every site that both
+  // sends and receives would have appeared twice.
   const siteOptions = Array.from(
-    new Set([...(options["source_site"] ?? []), ...(options["target_site"] ?? [])]),
-  ).sort();
+    new Map(
+      [...(options["source_site"] ?? []), ...(options["target_site"] ?? [])].map(
+        (option) => [option.value, option],
+      ),
+    ).values(),
+  ).sort((a, b) => a.label.localeCompare(b.label));
 
   return (
     <section
@@ -80,9 +92,9 @@ export function FilterBar({ compact = false }: { compact?: boolean }) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL}>All</SelectItem>
-                {list.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {value}
+                {list.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
                   </SelectItem>
                 ))}
               </SelectContent>

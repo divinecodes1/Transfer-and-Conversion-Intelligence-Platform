@@ -54,6 +54,8 @@ CREATE OR REPLACE VIEW tr_mart.mart_project_register AS
 SELECT
     k.project_key, k.project_id, k.project_name,
     k.transfer_type, k.complexity_class, k.portfolio,
+    k.product_line, k.product_name,
+    k.application_segment, k.application_name,
     k.source_site, k.target_site, k.status,
     k.actual_start, k.actual_finish,
     k.baseline_start, k.baseline_finish,
@@ -93,27 +95,46 @@ WHERE status IN ('ACTIVE','PLANNED');
 -- list is derived, and it is derived through the register, which means it is
 -- entitlement-scoped like everything else: you cannot enumerate a portfolio you
 -- are not allowed to see.
+-- Each option carries the value a filter binds on AND the label a human reads.
+--
+-- They are the same string for most dimensions -- a site is called what it is
+-- called. They diverge for the product and application taxonomy, where the
+-- filter must bind on a stable code (`SECURITY_CARD`) while the dropdown has
+-- to read "Security & Smart Card Solutions".
+--
+-- Both come from here rather than the browser deriving one from the other,
+-- because a client-side prettifier is a second naming authority: the day the
+-- catalogue renames a line, the filter list and the chart axis disagree and
+-- only one of them is right.
 CREATE OR REPLACE VIEW tr_mart.mart_filter_options AS
-SELECT 'fiscal_year' AS dimension, CAST(completion_fiscal_year AS VARCHAR) AS value
+SELECT 'fiscal_year' AS dimension,
+       CAST(completion_fiscal_year AS VARCHAR) AS value,
+       CAST(completion_fiscal_year AS VARCHAR) AS label
 FROM   tr_mart.mart_project_register WHERE completion_fiscal_year IS NOT NULL
 UNION
-SELECT 'transfer_type', transfer_type
+SELECT 'transfer_type', transfer_type, transfer_type
 FROM   tr_mart.mart_project_register WHERE transfer_type IS NOT NULL
 UNION
-SELECT 'portfolio', portfolio
+SELECT 'portfolio', portfolio, portfolio
 FROM   tr_mart.mart_project_register WHERE portfolio IS NOT NULL
 UNION
-SELECT 'complexity_class', complexity_class
+SELECT 'complexity_class', complexity_class, complexity_class
 FROM   tr_mart.mart_project_register WHERE complexity_class IS NOT NULL
 UNION
-SELECT 'source_site', source_site
+SELECT 'source_site', source_site, source_site
 FROM   tr_mart.mart_project_register WHERE source_site IS NOT NULL
 UNION
-SELECT 'target_site', target_site
+SELECT 'target_site', target_site, target_site
 FROM   tr_mart.mart_project_register WHERE target_site IS NOT NULL
 UNION
-SELECT 'status', status
+SELECT 'product_line', product_line, product_name
+FROM   tr_mart.mart_project_register WHERE product_line IS NOT NULL
+UNION
+SELECT 'application_segment', application_segment, application_name
+FROM   tr_mart.mart_project_register WHERE application_segment IS NOT NULL
+UNION
+SELECT 'status', status, status
 FROM   tr_mart.mart_project_register WHERE status IS NOT NULL
 UNION
-SELECT 'health', health
+SELECT 'health', health, health
 FROM   tr_mart.mart_project_register WHERE health IS NOT NULL;

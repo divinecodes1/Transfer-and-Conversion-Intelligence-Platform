@@ -17,6 +17,10 @@ export type Filters = {
   transfer_type?: string | null;
   portfolio?: string | null;
   complexity?: string | null;
+  /** What is being moved. Bound on the catalogue CODE, never the display name. */
+  product_line?: string | null;
+  /** Which end market buys it. Also a code. */
+  application_segment?: string | null;
 };
 
 export const emptyFilters: Filters = {};
@@ -24,7 +28,15 @@ export const emptyFilters: Filters = {};
 /** Just the set filters, in a stable key order — also the query-cache key. */
 export function activeFilters(filters: Filters): Record<string, string | number> {
   const out: Record<string, string | number> = {};
-  for (const key of ["fiscal_year", "site", "transfer_type", "portfolio", "complexity"] as const) {
+  for (const key of [
+    "fiscal_year",
+    "site",
+    "transfer_type",
+    "portfolio",
+    "complexity",
+    "product_line",
+    "application_segment",
+  ] as const) {
     const value = filters[key];
     if (value !== null && value !== undefined && value !== "") out[key] = value;
   }
@@ -109,6 +121,13 @@ export type ProjectRow = {
   transfer_type: string | null;
   complexity_class: string | null;
   portfolio: string | null;
+  // Code and display name arrive together from the catalogue join, so a table
+  // cell can render the name without the browser holding a lookup that could
+  // drift from the codes it is filtering on.
+  product_line: string | null;
+  product_name: string | null;
+  application_segment: string | null;
+  application_name: string | null;
   source_site: string | null;
   target_site: string | null;
   status: string;
@@ -226,11 +245,21 @@ export const projectDetailQuery = (projectId: string) =>
     queryFn: ({ signal }) => get<ProjectDetail>(`/projects/${projectId}`, undefined, signal),
   });
 
+/**
+ * A filter option: the value that binds, and the label a human reads.
+ *
+ * They differ only for the product and application taxonomy, where the filter
+ * carries a stable code and the dropdown shows the catalogue's display name.
+ * Both come from the API — deriving one from the other in the browser would
+ * make the console a second naming authority.
+ */
+export type FilterOption = { value: string; label: string };
+
 export const filterOptionsQuery = () =>
   queryOptions({
     queryKey: ["filter-options"],
     queryFn: ({ signal }) =>
-      get<{ data_as_of: string | null; options: Record<string, string[]> }>(
+      get<{ data_as_of: string | null; options: Record<string, FilterOption[]> }>(
         "/mart/filter-options",
         undefined,
         signal,

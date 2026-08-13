@@ -170,6 +170,11 @@ SELECT
     p.project_key, p.project_id, p.project_name,
     p.transfer_type, p.complexity_class,
     p.portfolio, p.source_site, p.target_site, p.status,
+    -- Codes and display names together: a filter binds on the code, a chart
+    -- axis renders the name, and neither consumer has to carry its own
+    -- lookup table that can drift from the catalogue.
+    p.product_line, pl.product_name,
+    p.application_segment, ap.application_name,
     p.actual_start, p.actual_finish,
     b.baseline_start, b.baseline_finish,
     l.latest_start, l.latest_finish, l.latest_forecast_finish,
@@ -185,6 +190,8 @@ SELECT
     fy.fiscal_year AS completion_fiscal_year,
     sfy.fiscal_year AS start_fiscal_year
 FROM        tr_core.dim_project p
+LEFT JOIN   tr_core.dim_product_line pl ON pl.product_code     = p.product_line
+LEFT JOIN   tr_core.dim_application  ap ON ap.application_code = p.application_segment
 LEFT JOIN   tr_metric.v_baseline_schedule   b  USING (project_key)
 LEFT JOIN   tr_metric.v_latest_schedule     l  USING (project_key)
 LEFT JOIN   tr_metric.v_project_cycle_time  ct USING (project_key)

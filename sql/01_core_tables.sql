@@ -21,6 +21,8 @@ DROP TABLE IF EXISTS tr_core.fact_milestone_event CASCADE;
 DROP TABLE IF EXISTS tr_core.fact_schedule_revision CASCADE;
 DROP TABLE IF EXISTS tr_core.fact_project_snapshot CASCADE;
 DROP TABLE IF EXISTS tr_core.dim_readiness_dimension CASCADE;
+DROP TABLE IF EXISTS tr_core.dim_product_line CASCADE;
+DROP TABLE IF EXISTS tr_core.dim_application CASCADE;
 DROP TABLE IF EXISTS tr_core.dim_milestone CASCADE;
 DROP TABLE IF EXISTS tr_core.dim_fiscal_date CASCADE;
 DROP TABLE IF EXISTS tr_core.dim_project CASCADE;
@@ -36,9 +38,36 @@ CREATE TABLE tr_core.dim_project (
     source_site      VARCHAR,
     target_site      VARCHAR,
     portfolio        VARCHAR,                   -- PF_AUTO | PF_POWER | PF_IOT
+    -- What is being moved, and who buys it. Two independent business
+    -- dimensions the transfer portfolio was previously blind to: "which
+    -- product lines are we moving this year?" and "which end markets are
+    -- exposed to a delay?" were unanswerable without them.
+    --
+    -- Deliberately NOT folded into `portfolio`. Portfolio is the internal
+    -- reporting unit and it is what row-level security scopes on
+    -- (sql/10_rls.sql) -- widening it to carry end-market meaning would
+    -- silently change who can see what.
+    product_line       VARCHAR,                 -- dim_product_line.product_code
+    application_segment VARCHAR,                -- dim_application.application_code
     status           VARCHAR,                   -- PLANNED | ACTIVE | COMPLETED | CANCELLED
     actual_start     DATE,
     actual_finish    DATE
+);
+
+-- The product taxonomy, as data rather than a CHECK constraint or an enum in
+-- application code. Same argument as the readiness weights: a catalogue the
+-- business renegotiates belongs in a table it can be shown, not in a CASE
+-- expression only engineering can read.
+CREATE TABLE tr_core.dim_product_line (
+    product_code VARCHAR PRIMARY KEY,
+    product_name VARCHAR,
+    sequence_no  INTEGER
+);
+
+CREATE TABLE tr_core.dim_application (
+    application_code VARCHAR PRIMARY KEY,
+    application_name VARCHAR,
+    sequence_no      INTEGER
 );
 
 CREATE TABLE tr_core.dim_milestone (

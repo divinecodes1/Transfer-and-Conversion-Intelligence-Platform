@@ -425,13 +425,60 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="flex min-h-screen flex-col bg-background">
       <AppHeader onMenu={() => setMobileNavOpen(true)} />
-      <div className="flex min-h-[calc(100vh-4rem)]">
+      <div className="flex flex-1">
         <AppSidebar open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
         <div className="min-w-0 flex-1">{children}</div>
       </div>
+      <AppFooter />
     </div>
+  );
+}
+
+/**
+ * The closing band.
+ *
+ * A solid brand-coloured footer is the most recognisable structural element of
+ * the reference design language: every page in it terminates in one. It also
+ * does something useful here rather than only decorative — a dense analytical
+ * page otherwise just stops, and the band gives the content a floor.
+ *
+ * `flex-col` + `flex-1` on the shell above is what keeps it at the bottom of a
+ * short screen instead of floating halfway up an empty viewport.
+ *
+ * Colours come from --brand in styles.css, never from a literal here:
+ * tests/web_checks.py asserts the palette lives in exactly one file.
+ */
+function AppFooter() {
+  return (
+    <footer className="no-print mt-auto bg-brand text-brand-foreground">
+      <div className="mx-auto flex max-w-[1600px] flex-col gap-3 px-6 py-6 text-xs sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
+          <Activity className="size-4" aria-hidden="true" />
+          <span className="font-medium">Transfer &amp; Conversion Intelligence Platform</span>
+        </div>
+
+        <nav className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <Link to="/catalogue" className="hover:underline">
+            Metric catalogue
+          </Link>
+          <Link to="/access" className="hover:underline">
+            Access &amp; entitlements
+          </Link>
+          <Link to="/reports" className="hover:underline">
+            Reports
+          </Link>
+        </nav>
+
+        {/* The disclaimer belongs somewhere permanent, not only in a dismissible
+            banner. Synthetic data presented as real would be the one genuinely
+            damaging thing this demonstration could do. */}
+        <span className="text-brand-muted">
+          Demonstration environment · synthetic data
+        </span>
+      </div>
+    </footer>
   );
 }
 
