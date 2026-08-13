@@ -14,11 +14,51 @@ trusted metric foundation.
 > enforcement, observability and the interview package.
 > 207 automated assertions across eighteen suites.
 
-**Start here:** [Proposal](docs/PROPOSAL.md) (one page) ·
+---
+
+## If you have five minutes
+
+```powershell
+.\scripts\demo.ps1          # or: make demo
+```
+
+One command. Database, warehouse, API, assistant and console, seeded and open
+in a browser. `Ctrl+C` stops it.
+
+Then, in order:
+
+| | Screen | What it shows |
+| --- | --- | --- |
+| 1 | **Overview** | on-time rate, cycle time, and a briefing that cites its own figures |
+| 2 | **Readiness** | in-flight work worst-first; qualification is the binding constraint |
+| 3 | **T-002** | 77.15% ready, limited by qualification — the number is a weighted mean of seven dimensions whose weights live in a table |
+| 4 | **Similar transfers** | what happened to comparable completed transfers, scored deterministically so the match can be argued with |
+| 5 | **Identity menu** | switch `admin` → `manager.auto`; the same screen drops to one portfolio, enforced by row-level security in the database rather than by hiding a filter |
+
+**The one claim worth testing:** every panel states the metric definition, the
+population, the filters applied and the data vintage that produced its number —
+and a test suite fails the build if the catalogue and the SQL ever disagree.
+
+Three documents, in the order a reviewer wants them:
+[Proposal](docs/PROPOSAL.md) (one page) ·
 [Architecture](docs/ARCHITECTURE.md) (two diagrams) ·
-[Demo runbook](docs/DEMO_RUNBOOK.md) (5 minutes) ·
+[Production readiness](docs/PRODUCTION.md) (what is hardened, and what is not)
+
+<details>
+<summary>Everything else</summary>
+
+[Demo runbook](docs/DEMO_RUNBOOK.md) (minute by minute) ·
 [Pilot plan](docs/PILOT.md) (three weeks) ·
-[Production readiness](docs/PRODUCTION.md) (what is hardened, and what still isn't)
+[Build sequence](docs/PLAN.md) ·
+[Master plan](docs/MASTER_PLAN.md) ·
+[Infineon → replica mapping](docs/mapping.md) ·
+[AWS deployment](docs/aws-deployment.md) ·
+[AI providers](docs/openai-configuration.md) ·
+[Cost controls](docs/cost-controls.md)
+
+</details>
+
+---
 
 ```
         warehouse ──▶ governed metric layer ──▶ analytics API ──┬──▶ console + dashboards

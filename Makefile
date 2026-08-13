@@ -7,7 +7,7 @@ endif
 
 .PHONY: install data build test test-pg test-all ingest test-legacy test-api test-agent test-auth \
         test-rbac test-sec test-bi test-obs test-dags test-rag test-k8s test-readiness \
-        test-mart test-ai test-web dataset image \
+        test-mart test-ai test-web dataset image demo \
         k8s-up rag-up api agent dash evals pg-up pg-build sso-up obs-up down clean
 
 install:      ## install python deps
@@ -114,6 +114,13 @@ dash:         ## serve the hand-built dashboards on :8501 (needs `make api` runn
 
 web-install:  ## install the console's node dependencies (one time)
 	cd web && npm install
+
+demo:         ## ONE COMMAND: database + warehouse + API + assistant + console, seeded
+	@# For showing the platform to someone. Runs in demo mode, so there is no
+	@# sign-in and no Keycloak cold start, and the console's identity switcher
+	@# demonstrates entitlement enforcement faster than logging in twice would.
+	@# Localhost only -- the deployed path uses enforced authentication.
+	pwsh -NoProfile -File scripts/demo.ps1 || powershell -NoProfile -File scripts/demo.ps1
 
 web:          ## serve the React console on :5173 (proxies to `make api` + `make agent`)
 	cd web && npm run dev
