@@ -57,7 +57,13 @@ cmd /c "aws ecr get-login-password --region $Region | docker login --username AW
 Assert-Native 'ECR login'
 docker build -t transfer-intelligence:base $Root
 Assert-Native 'Base image build'
-docker build -f (Join-Path $Root 'infrastructure/docker/lambda/Dockerfile') --build-arg BASE_IMAGE=transfer-intelligence:base -t "${ApiRepo}:latest" $Root
+# --provenance=false --sbom=false is required, not tidiness. Buildx defaults to
+# attaching provenance and SBOM attestations, which makes the pushed tag an OCI
+# image *index* wrapping the image plus an attestation manifest. Lambda accepts
+# only a plain image manifest and rejects the index with "The image manifest,
+# config or layer media type ... is not supported" at CreateFunction.
+# The platform is pinned because api.tf fixes architectures = ["x86_64"].
+docker build --provenance=false --sbom=false --platform linux/amd64 -f (Join-Path $Root 'infrastructure/docker/lambda/Dockerfile') --build-arg BASE_IMAGE=transfer-intelligence:base -t "${ApiRepo}:latest" $Root
 Assert-Native 'Lambda image build'
 docker build -f (Join-Path $Root 'infrastructure/docker/keycloak/Dockerfile') -t "${KcRepo}:latest" $Root
 Assert-Native 'Keycloak image build'
