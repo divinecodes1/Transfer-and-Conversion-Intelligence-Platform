@@ -73,6 +73,22 @@ def _ok(payload):
     return JSONResponse(content=payload)
 
 
+def _values(options, dimension):
+    """The bound values of one filter dimension, as flat scalars.
+
+    /mart/filter-options serves {value, label} pairs so the product and
+    application taxonomy can bind on a stable code while showing the
+    catalogue's display name. The dashboard's filter bar exposes neither of
+    those dimensions, and for the ones it does expose the two fields are
+    identical -- so the pair collapses to its value here rather than the page
+    growing a second naming authority for codes that need no prettifying.
+
+    Tolerates a bare scalar so a plain list stays readable to this function.
+    """
+    return [o["value"] if isinstance(o, dict) else o
+            for o in options.get(dimension, [])]
+
+
 def _require_admin(api: Api):
     identity = api.whoami()
     if "PLATFORM_ADMIN" not in identity.get("roles", []):
@@ -121,17 +137,17 @@ def bootstrap(request: Request):
         "whoami": api.whoami(),
         "health": api.health(),
         "catalogue": api.catalogue(),
-        "fiscal_years": options.get("fiscal_year") or sorted({
+        "fiscal_years": _values(options, "fiscal_year") or sorted({
             r["group_value"] for r in cycle["series"]
             if r["group_value"] is not None}),
-        "transfer_types": options.get("transfer_type") or sorted({
+        "transfer_types": _values(options, "transfer_type") or sorted({
             p["transfer_type"] for p in projects["projects"]
             if p["transfer_type"]}),
-        "portfolios": options.get("portfolio") or sorted({
+        "portfolios": _values(options, "portfolio") or sorted({
             r["portfolio"] for r in portfolio["series"] if r["portfolio"]}),
-        "sites": sorted(set(options.get("source_site", [])) |
-                        set(options.get("target_site", []))),
-        "complexities": options.get("complexity_class", []),
+        "sites": sorted(set(_values(options, "source_site")) |
+                        set(_values(options, "target_site"))),
+        "complexities": _values(options, "complexity_class"),
         "ai": ai_status,
     })
 
