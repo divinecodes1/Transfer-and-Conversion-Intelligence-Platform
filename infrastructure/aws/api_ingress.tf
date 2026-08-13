@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 # HTTPS ingress for the two request-serving Lambdas.
 #
 # The functions are addressed through CloudFront rather than by their own
@@ -35,6 +35,32 @@ locals {
   assistant_origin_host = replace(replace(aws_lambda_function_url.assistant.function_url, "https://", ""), "/", "")
 }
 
+# Managed-AllViewerExceptHostHeader cannot be used with an Origin Access
+# Control. It forwards every header except Host -- including Authorization --
+# and OAC puts its SigV4 signature in exactly that header. When the policy
+# claims Authorization, CloudFront forwards the request UNSIGNED, and a
+# function URL set to AWS_IAM answers 403. Nothing in the configuration looks
+# wrong; the request simply arrives without a signature.
+resource "aws_cloudfront_origin_request_policy" "lambda_signed" {
+  name    = "${local.name}-lambda-signed"
+  comment = "All viewer headers except Host and Authorization -- OAC signs into Authorization"
+
+  cookies_config {
+    cookie_behavior = "all"
+  }
+
+  query_strings_config {
+    query_string_behavior = "all"
+  }
+
+  headers_config {
+    header_behavior = "allExcept"
+    headers {
+      items = ["host", "authorization"]
+    }
+  }
+}
+
 resource "aws_cloudfront_distribution" "api" {
   enabled     = true
   comment     = "${local.name} analytics API HTTPS ingress"
@@ -62,10 +88,10 @@ resource "aws_cloudfront_distribution" "api" {
     # on anything less than the caller's identity would serve one tenant's
     # figures to another. The API does its own short-TTL caching server-side.
     cache_policy_id = data.aws_cloudfront_cache_policy.disabled.id
-    # Host must not be forwarded -- SigV4 is computed over the origin host, and
-    # forwarding the viewer's Host breaks the signature. Authorization IS
-    # forwarded by this policy, which is what carries the Keycloak token.
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_except_host.id
+    # Neither Host nor Authorization may be forwarded: SigV4 is computed over
+    # the origin host, and the signature itself travels in Authorization. See
+    # the policy above for what that costs and how the token still arrives.
+    origin_request_policy_id = aws_cloudfront_origin_request_policy.lambda_signed.id
   }
 
   restrictions {
@@ -103,7 +129,7 @@ resource "aws_cloudfront_distribution" "assistant" {
     cached_methods           = ["GET", "HEAD"]
     compress                 = true
     cache_policy_id          = data.aws_cloudfront_cache_policy.disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_except_host.id
+    origin_request_policy_id = aws_cloudfront_origin_request_policy.lambda_signed.id
   }
 
   restrictions {
