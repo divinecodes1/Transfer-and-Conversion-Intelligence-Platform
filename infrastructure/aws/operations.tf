@@ -63,7 +63,12 @@ resource "aws_ssm_document" "warehouse_seed" {
           "READER=\"$(aws ssm get-parameter --region ${var.region} --name '/${local.name}/db-reader-password' --with-decryption --query Parameter.Value --output text)\"",
           "AUDITOR=\"$(aws ssm get-parameter --region ${var.region} --name '/${local.name}/db-auditor-password' --with-decryption --query Parameter.Value --output text)\"",
           "AI=\"$(aws ssm get-parameter --region ${var.region} --name '/${local.name}/db-ai-password' --with-decryption --query Parameter.Value --output text)\"",
-          "docker run --rm --network host --user root -e TRANSFEROPS_DSN=\"$DSN\" -e TRANSFEROPS_READER_PASSWORD=\"$READER\" -e TRANSFEROPS_AUDITOR_PASSWORD=\"$AUDITOR\" -e TRANSFEROPS_AI_PASSWORD=\"$AI\" -e TRANSFEROPS_OPERATOR=\"$OPERATOR\" \"$IMAGE\" sh -lc 'python etl/generate_data.py && python etl/run.py --engine postgres --dsn \"$TRANSFEROPS_DSN\" && python etl/grant_operator.py --dsn \"$TRANSFEROPS_DSN\"'",
+          # `sh -c`, never `sh -lc`. A login shell re-reads /etc/profile, which
+          # resets PATH and discards the /opt/venv/bin the image sets -- `python`
+          # then resolves to the system interpreter, which has none of the
+          # dependencies. The failure is delayed and confusing: generate_data.py
+          # is pure stdlib and succeeds, and the load dies on `import psycopg2`.
+          "docker run --rm --network host --user root -e TRANSFEROPS_DSN=\"$DSN\" -e TRANSFEROPS_READER_PASSWORD=\"$READER\" -e TRANSFEROPS_AUDITOR_PASSWORD=\"$AUDITOR\" -e TRANSFEROPS_AI_PASSWORD=\"$AI\" -e TRANSFEROPS_OPERATOR=\"$OPERATOR\" \"$IMAGE\" sh -c 'python etl/generate_data.py && python etl/run.py --engine postgres --dsn \"$TRANSFEROPS_DSN\" && python etl/grant_operator.py --dsn \"$TRANSFEROPS_DSN\"'",
         ]
       }
     }]
