@@ -118,7 +118,7 @@ export function ProjectsScreen() {
           rows={8}
         >
           <Table>
-            <TableHeader className="sticky top-14 z-10 bg-card">
+            <TableHeader className="border-t border-border bg-card">
               <TableRow>
                 {COLUMNS.map((column) => (
                   <TableHead key={column.key}>

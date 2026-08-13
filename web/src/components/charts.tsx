@@ -260,6 +260,21 @@ export function BoxPlot({
   }[];
   height?: number;
 }) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = React.useState(720);
+
+  React.useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const measure = () => setContainerWidth(Math.max(720, Math.floor(container.clientWidth)));
+    measure();
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
   const values = rows.flatMap((row) =>
     [row.min_days, row.p25, row.p50, row.p75, row.p90, row.max_days].filter(
       (value): value is number => value !== null,
@@ -274,7 +289,10 @@ export function BoxPlot({
   const padLeft = 48;
   const padRight = 24;
   const minBandWidth = 110;
-  const viewWidth = Math.max(padLeft + padRight + rows.length * minBandWidth, 420);
+  const viewWidth = Math.max(
+    containerWidth,
+    padLeft + padRight + rows.length * minBandWidth,
+  );
   const plotWidth = viewWidth - padLeft - padRight;
   const plotHeight = height - padTop - padBottom;
   const scale = (value: number) =>
@@ -284,13 +302,15 @@ export function BoxPlot({
   const boxWidth = Math.min(60, bandWidth * 0.58);
 
   return (
-    <svg
-      viewBox={`0 0 ${viewWidth} ${height}`}
-      className="block h-auto w-full max-w-none"
-      style={{ minWidth: viewWidth }}
-      role="img"
-      aria-label="Cycle-time distribution by cohort"
-    >
+    <div ref={containerRef} className="min-w-[720px]">
+      <svg
+        width={viewWidth}
+        height={height}
+        viewBox={`0 0 ${viewWidth} ${height}`}
+        className="block max-w-none"
+        role="img"
+        aria-label="Cycle-time distribution by cohort"
+      >
       {[0, 0.25, 0.5, 0.75, 1].map((fraction) => {
         const value = min + (max - min) * fraction;
         return (
@@ -316,7 +336,7 @@ export function BoxPlot({
         );
       })}
 
-      {rows.map((row, index) => {
+        {rows.map((row, index) => {
         const centre = padLeft + (index + 0.5) * bandWidth;
         const x = centre - boxWidth / 2;
         const p90Inset = Math.min(12, boxWidth * 0.2);
@@ -391,7 +411,8 @@ export function BoxPlot({
             </text>
           </g>
         );
-      })}
-    </svg>
+        })}
+      </svg>
+    </div>
   );
 }

@@ -10,6 +10,7 @@
  * one on the server, because a check the browser performs is a check the browser
  * can skip.
  */
+import { useEffect, useLayoutEffect } from "react";
 import {
   createRootRoute,
   createRoute,
@@ -51,11 +52,31 @@ import { ReportsScreen } from "@/routes/reports";
 
 function Shell() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+
+  // SPA navigation otherwise inherits the scroll offset of the screen being
+  // left.  On a tall analytical view that can open the next route halfway
+  // through its first graph, underneath the sticky application header, which
+  // looks like the chart itself has been clipped.  Each screen is a distinct
+  // workspace, so start it at its own top; interactions within a screen do not
+  // change the pathname and therefore keep the reader's position.
+  useEffect(() => {
+    const previous = window.history.scrollRestoration;
+    window.history.scrollRestoration = "manual";
+    return () => {
+      window.history.scrollRestoration = previous;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
   const showWorkspaceScope = [
     "/",
     "/projects",
     "/distribution",
     "/forecast-accuracy",
+    "/readiness",
     "/reports",
     "/ask",
   ].some((path) => (path === "/" ? pathname === "/" : pathname.startsWith(path)));

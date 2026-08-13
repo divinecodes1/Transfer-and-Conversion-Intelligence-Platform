@@ -24,7 +24,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { FilterBar } from "@/components/FilterBar";
 import { KpiTile, PageHeader, Panel, QueryState, ReadinessBadge } from "@/components/panels";
 import { useFilters } from "@/lib/app-state";
 import {
@@ -53,8 +52,6 @@ export function ReadinessScreen() {
         title="Transfer readiness"
         description="How prepared the in-flight portfolio is to execute, by weighted dimension. Assessed for active and planned transfers only — a completed transfer has an outcome, not a readiness."
       />
-
-      <FilterBar />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile
