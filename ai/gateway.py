@@ -33,8 +33,10 @@ entry point raises `AiUnavailable` rather than failing at import -- so the
 platform still serves dashboards and the deterministic assistant with no model
 configured at all.
 """
+import hashlib
 import json
 import os
+import re
 import threading
 
 from .errors import AiError, AiUnavailable, classify
@@ -54,7 +56,17 @@ DEFAULTS = {
         "key_env": "OPENAI_API_KEY",
         "base_url": "https://api.openai.com/v1",
     },
+    # No key, no endpoint, no bill. See _Mock for why this is a first-class
+    # provider rather than a test double.
+    "mock": {
+        "model": "mock-deterministic",
+        "key_env": None,
+        "base_url": None,
+    },
 }
+
+# Providers that need no credential to be considered usable.
+CREDENTIAL_FREE = {"mock"}
 
 MAX_TOKENS = int(os.environ.get("TRANSFEROPS_AI_MAX_TOKENS", "4000"))
 TIMEOUT = float(os.environ.get("TRANSFEROPS_AI_TIMEOUT", "120"))
@@ -95,8 +107,18 @@ def configured():
     what the API reports at /ai/status and what the frontend reads to decide
     whether to render an AI panel at all -- an empty card with a retry button is
     worse than no card.
+
+    The mock provider is always configured: it is the deployment mode that
+    exists precisely so the AI surfaces stay usable when no credential does.
     """
+    if provider_name() in CREDENTIAL_FREE:
+        return True
     return bool(api_key()) or bool(os.environ.get("TRANSFEROPS_AI_BASE_URL", "").strip())
+
+
+def mocked():
+    """Whether answers are deterministic placeholders rather than generated."""
+    return provider_name() in CREDENTIAL_FREE
 
 
 def describe():
@@ -106,6 +128,10 @@ def describe():
         "model": model_name() if configured() else None,
         "base_url": base_url(),
         "max_tokens": MAX_TOKENS,
+        # Surfaced so the console can label the panel rather than passing a
+        # placeholder off as generated analysis. A demo that hides which mode it
+        # is in is a demo that misrepresents itself.
+        "mocked": mocked(),
     }
 
 
@@ -369,8 +395,191 @@ def _to_openai(message):
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+class _Mock:
+    """
+    A provider that answers without a model.
+
+    This exists because a demonstration must not depend on somebody's API
+    credits. Model billing is separate from any chat subscription, promotional
+    credits expire, and a key that worked in October is a 401 in November -- so
+    "the AI features are unavailable today" would otherwise be the story a
+    reviewer leaves with.
+
+    The important design constraint is that this is NOT a stub returning lorem
+    ipsum. It composes its answer *out of the governed payload it was handed*,
+    which gives it the same property the real prompts are held to and which
+    tests/ai_checks.py asserts: no figure appears in the output that did not
+    arrive from the metric layer. A mock free to invent numbers would be worse
+    than no mock, because a reviewer cannot tell an invented 78% from a governed
+    one by looking.
+
+    It is deterministic. The same warehouse vintage and the same question
+    produce the same words, which makes the demo repeatable and makes the
+    caching layer above behave exactly as it does against a real provider.
+    """
+
+    name = "mock"
+
+    # A figure the prompt actually stated, e.g. `"on_time_rate": 41.5`.
+    _NUMBER = re.compile(r'"([a-z_]+)"\s*:\s*(-?\d+(?:\.\d+)?)')
+    _PROJECT = re.compile(r"\b(T-\d{3})\b")
+
+    def complete(self, *, system, messages, tools=None, json_schema=None,
+                 max_tokens=None):
+        context = "\n".join(
+            m.get("content", "") if isinstance(m.get("content"), str)
+            else json.dumps(m.get("content"), default=str)
+            for m in messages
+        )
+        facts = {k: float(v) for k, v in self._NUMBER.findall(context)}
+        projects = sorted(set(self._PROJECT.findall(context)))
+
+        if json_schema is not None:
+            payload = _mock_from_schema(json_schema, facts, projects)
+            text = json.dumps(payload)
+        else:
+            text = self._narrative(facts, projects)
+
+        return Reply(
+            text=text,
+            tool_calls=[],          # the mock never asks for a tool: it has the data
+            stop_reason="end_turn",
+            model="mock-deterministic",
+            provider=self.name,
+            # Zero, honestly. The cost dashboard should show this as free rather
+            # than estimating tokens nobody was billed for.
+            usage={"input_tokens": 0, "output_tokens": 0, "mocked": True},
+        )
+
+    def _narrative(self, facts, projects):
+        """A briefing assembled from the figures the prompt supplied."""
+        lines = []
+
+        def say(label, key, unit="", digits=1):
+            if key in facts:
+                value = facts[key]
+                shown = f"{value:.{digits}f}".rstrip("0").rstrip(".")
+                lines.append(f"{label} is {shown}{unit}.")
+
+        say("On-time completion", "on_time_rate", "%")
+        say("Median cycle time", "median_cycle_time", " days", 0)
+        say("Replan rate", "replan_rate", "%")
+        say("Average readiness", "avg_readiness_pct", "%")
+        say("Work in progress", "wip", "", 0)
+
+        if "delayed_count" in facts and facts["delayed_count"] > 0:
+            lines.append(
+                f"{int(facts['delayed_count'])} transfers are in the late band "
+                f"and are where attention is worth spending.")
+
+        if projects:
+            named = ", ".join(projects[:5])
+            lines.append(f"The transfers in scope include {named}.")
+
+        if not lines:
+            lines.append(
+                "No governed figures were supplied with this question, so there "
+                "is nothing to summarise.")
+
+        lines.append(
+            "Generated without a model (TRANSFEROPS_AI_PROVIDER=mock). Every "
+            "number above was taken from the governed metric layer, not "
+            "produced by generation.")
+        return " ".join(lines)
+
+
+def _mock_score(project_id):
+    """
+    A stable pseudo-score for one project, in 0..100.
+
+    Deterministic from the id alone, so the same project scores the same on
+    every run and across every replica -- a demo where the risk table reshuffles
+    on refresh reads as broken, however plausible each individual number looks.
+
+    This is a *placeholder ordering*, not a prediction, and the band names below
+    are the platform's own. The real delay-risk model lives in ai/risk.py and is
+    fenced out of the metric layer; nothing here is registered as a metric.
+    """
+    digest = hashlib.sha256(project_id.encode()).digest()
+    return digest[0] * 100 // 255
+
+
+def _mock_from_schema(schema, facts, projects, field=None):
+    """
+    Build a value satisfying `schema`, using the prompt's own figures.
+
+    Walks the schema rather than hard-coding a response shape, so a new
+    structured prompt does not need a matching branch here. Arrays of
+    per-project objects expand to one entry per project the prompt named, which
+    is what makes the structured output look like an answer rather than a stub.
+    """
+    kind = schema.get("type")
+
+    if kind == "object":
+        props = schema.get("properties", {})
+        return {
+            name: _mock_from_schema(sub, facts, projects, field=name)
+            for name, sub in props.items()
+        }
+
+    if kind == "array":
+        items = schema.get("items", {})
+        per_project = (
+            items.get("type") == "object"
+            and "project_id" in items.get("properties", {})
+        )
+        if per_project:
+            return [_mock_from_schema(items, facts, [pid]) for pid in projects]
+        if items.get("type") == "string":
+            return list(_MOCK_DRIVERS[:3])
+        return []
+
+    score = _mock_score(projects[0]) if projects else 0
+
+    if kind in ("integer", "number"):
+        if field == "risk_score":
+            return score
+        if field == "predicted_slip_days":
+            # Scaled off the same digest so slip and score never disagree.
+            return round(score / 5)
+        # Any other number the prompt already stated, echoed rather than invented.
+        return round(facts.get(field, 0)) if kind == "integer" else facts.get(field, 0)
+
+    if kind == "string":
+        if field == "project_id":
+            return projects[0] if projects else ""
+        if schema.get("enum"):
+            options = schema["enum"]
+            if field in ("risk_band", "band"):
+                # Thirds of the score range, mapped onto whatever the schema
+                # actually offers rather than assuming low/medium/high.
+                index = min(len(options) - 1, score * len(options) // 100)
+                return options[index]
+            return options[0]
+        if field in ("rationale", "summary", "explanation"):
+            return (
+                "Deterministic placeholder produced without a model "
+                "(TRANSFEROPS_AI_PROVIDER=mock). Ordering is stable but is not a "
+                "prediction; configure a provider for generated reasoning."
+            )
+        return ""
+
+    if kind == "boolean":
+        return False
+
+    return None
+
+
+_MOCK_DRIVERS = [
+    "qualification readiness below the portfolio average",
+    "equipment readiness below the portfolio average",
+    "schedule already moved from the frozen baseline",
+]
+
+
 _ADAPTERS = {"anthropic": _Anthropic, "openai": _OpenAICompatible,
-             "openai-compatible": _OpenAICompatible}
+             "openai-compatible": _OpenAICompatible, "mock": _Mock}
 
 _CLIENT = {"key": None, "value": None}
 _LOCK = threading.Lock()

@@ -19,6 +19,23 @@ warehouse*.duckdb
 .env.*
 !.env.example
 
+# Terraform.
+#
+# State is the important one: it holds every generated password -- database
+# roles, the Keycloak admin -- in PLAINTEXT. Anyone with the file has the
+# warehouse. Local state is a deliberate student-tier choice (a remote backend
+# needs a storage account that exists before Terraform runs), and gitignoring it
+# is the other half of that decision. The enterprise path moves it into a
+# storage account with restricted access; see azure/migration-to-enterprise.md.
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+# Real values, including subscription ids. The .example is the committed one.
+*.tfvars
+!*.tfvars.example
+
 # Environments
 .venv*/
 venv/

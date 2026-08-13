@@ -1,0 +1,177 @@
+name: Backend
+
+# Build, test and ship the API container.
+#
+# The gates run BEFORE the image is built, not after it is deployed. This repo's
+# whole argument is that a metric is only trustworthy because something proves it
+# reconciles -- shipping an image whose golden gate failed would make the badge a
+# decoration. ci.yml runs the full seventeen-suite matrix against PostgreSQL; this
+# workflow runs the server-free subset, which is what can gate a container build
+# in under two minutes.
+#
+# Images go to GitHub Container Registry, not Azure Container Registry. ACR Basic
+# is a fixed ~5 USD/month on a 100 USD student credit; GHCR is free for public
+# images and Container Apps pulls them without a credential.
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - "docs/**"
+      - "azure/**"
+      - "**/*.md"
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Deploy to Azure after building"
+        type: boolean
+        default: true
+
+concurrency:
+  # A second push should replace an in-flight deploy, not race it onto the same
+  # Container App revision.
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Syntax check
+        run: python -m compileall -q ai api agent bi etl observability tests
+
+      - name: Build the warehouse
+        run: |
+          python etl/generate_data.py
+          python etl/run.py --engine duckdb
+
+      # The gates that need no server. Each one is a claim the deployment makes.
+      - name: Golden-project reconciliation
+        run: python tests/golden_projects.py
+      - name: Metric governance
+        run: python tests/governance_checks.py
+      - name: Mart layer
+        run: python tests/mart_checks.py
+      - name: Readiness, network and similarity
+        run: python tests/readiness_checks.py
+      - name: AI layer boundaries
+        run: python tests/ai_checks.py
+      - name: Console isolation
+        run: python tests/web_checks.py
+
+      # Asserts the platform still runs with no model configured. That property
+      # is what makes AI_PROVIDER=mock a supported deployment mode rather than a
+      # fallback nobody tested.
+      - name: AI degrades without a provider
+        env:
+          TRANSFEROPS_AI_PROVIDER: mock
+        run: python -c "from ai import gateway; assert gateway.configured(); print('mock provider is configured and needs no credential')"
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        run: |
+          # Lower-cased: GHCR rejects an upper-case path, and GitHub org names
+          # frequently have capitals.
+          IMAGE=$(echo "${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "tag=${IMAGE}:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:latest
+            ${{ steps.meta.outputs.image }}:${{ github.sha }}
+          # Two tags only -- `latest` and the commit sha. The prototype keeps a
+          # short history on purpose; an untagged image nobody deletes is storage
+          # nobody notices.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    if: github.event_name == 'push' || inputs.deploy
+    runs-on: ubuntu-latest
+    environment: production-demo
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      # Federated credentials, not a stored client secret. The workflow proves
+      # its identity to Entra with a short-lived OIDC token issued by GitHub, so
+      # there is no long-lived deployment credential to leak or rotate. This is
+      # about the *deployment* identity only -- application sign-in remains
+      # Keycloak.
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Roll the Container App to the new image
+        run: |
+          set -euo pipefail
+          az containerapp update \
+            --name "${{ secrets.AZURE_CONTAINER_APP }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --image "${{ needs.build.outputs.image }}:${{ github.sha }}" \
+            --output none
+          echo "Deployed ${{ needs.build.outputs.image }}:${{ github.sha }}"
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          URL="https://$(az containerapp show \
+            --name "${{ secrets.AZURE_CONTAINER_APP }}" \
+            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            --query properties.configuration.ingress.fqdn -o tsv)"
+
+          # min_replicas is 0, so the first request after an idle period pays a
+          # cold start. Retry rather than calling that a failed deployment.
+          for attempt in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$URL/health" || true)
+            # 401 is a PASS: the service is up and refusing an unauthenticated
+            # caller, which is the posture the deployment is supposed to have.
+            if [ "$code" = "200" ] || [ "$code" = "401" ]; then
+              echo "healthy after ${attempt} attempt(s): HTTP $code at $URL/health"
+              exit 0
+            fi
+            echo "attempt ${attempt}: HTTP ${code:-none}, waiting for cold start"
+            sleep 10
+          done
+
+          echo "::error::API did not become healthy at $URL/health"
+          exit 1

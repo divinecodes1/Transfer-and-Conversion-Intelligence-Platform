@@ -1,0 +1,101 @@
+name: Frontend
+
+# Build the console and publish it to Azure Static Web Apps.
+#
+# The console is a Vite SPA -- static files, no server runtime. That is why
+# Static Web Apps Free is the right host and why nothing here needs to scale or
+# wake up: the page paints immediately even while the API is cold-starting, and
+# the Free tier includes a managed certificate and 100 GB/month of bandwidth.
+#
+# Everything under VITE_* is compiled into the bundle and is therefore PUBLIC.
+# Only values that are safe in a browser appear below: the API's own URL, the
+# Keycloak realm, and the public OIDC client id. No model key and no connection
+# string is a build input -- tests/web_checks.py asserts the built source holds
+# neither.
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "web/**"
+      - ".github/workflows/frontend.yml"
+  pull_request:
+    paths:
+      - "web/**"
+  workflow_dispatch:
+
+concurrency:
+  group: frontend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+        working-directory: web
+
+      # Typecheck and build. What CI can prove cheaply is that the console
+      # compiles against the API types it claims to consume; it cannot prove a
+      # chart looks right, so it does not pretend to.
+      - name: Typecheck and build
+        working-directory: web
+        env:
+          VITE_TRANSFEROPS_API: ${{ vars.VITE_TRANSFEROPS_API }}
+          VITE_TRANSFEROPS_AGENT: ${{ vars.VITE_TRANSFEROPS_AGENT }}
+          VITE_KEYCLOAK_URL: ${{ vars.VITE_KEYCLOAK_URL }}
+          VITE_KEYCLOAK_REALM: ${{ vars.VITE_KEYCLOAK_REALM }}
+          VITE_KEYCLOAK_CLIENT_ID: ${{ vars.VITE_KEYCLOAK_CLIENT_ID }}
+          VITE_TRANSFEROPS_AUTH: ${{ vars.VITE_TRANSFEROPS_AUTH }}
+        run: npm run build
+
+      # The console must not carry SQL, credentials, metric definitions or
+      # banding thresholds. Run on every frontend change, because that is
+      # exactly when someone is most tempted to compute a percentile in a
+      # component.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Console isolation gate
+        run: python tests/web_checks.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: console
+          path: web/dist
+          retention-days: 5
+
+  deploy:
+    needs: build
+    # Pull requests build and gate but do not publish. A preview environment per
+    # PR is a Standard-tier feature and this deployment is on Free.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production-demo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: console
+          path: web/dist
+
+      - name: Publish to Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: upload
+          # Pre-built above, so the action uploads rather than building again in
+          # its own container with a different toolchain.
+          app_location: web/dist
+          skip_app_build: true
+          skip_api_build: true

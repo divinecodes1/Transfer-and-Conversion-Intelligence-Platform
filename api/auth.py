@@ -43,6 +43,10 @@ from . import db
 
 log = logging.getLogger("transferops.auth")
 
+# The realm's public base URL. Locally this is the compose container; in Azure it
+# is the Keycloak Container App's own HTTPS hostname. Nothing else about
+# verification changes between the two, which is why the deployment needs no
+# second identity provider.
 KEYCLOAK_URL = os.environ.get("KEYCLOAK_URL", "http://localhost:8080")
 KEYCLOAK_REALM = os.environ.get("KEYCLOAK_REALM", "transferops")
 KEYCLOAK_AUDIENCE = os.environ.get("KEYCLOAK_AUDIENCE", "transferops-api")

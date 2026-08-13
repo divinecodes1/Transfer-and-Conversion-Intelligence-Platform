@@ -114,6 +114,53 @@ and set `TRANSFEROPS_AI_API_KEY` to switch it on. With no key the console hides
 its AI panels and everything else — dashboards, API, deterministic assistant —
 works unchanged. That is the state CI runs in. See [The AI layer](#the-ai-layer).
 
+## Azure Student Deployment
+
+A public demo on Azure for roughly **0–15 USD/month**, sized for the $100
+Azure for Students credit.
+
+```bash
+export GITHUB_TOKEN=ghp_...          # needs write:packages
+./scripts/deploy-azure-student.sh    # prerequisites → terraform → seed → smoke test
+```
+
+```text
+Static Web Apps (Free) ──▶ Container Apps: api  ──┬── PostgreSQL B1ms
+        the console          Consumption, min=0   ├── Blob Storage
+                                                  ├── Key Vault
+                       Container Apps: keycloak ──┘   (managed identity, no keys)
+                             Consumption, min=0
+                       Container Apps Job — nightly refresh, cron
+                       Log Analytics — capped at 0.1 GB/day
+```
+
+Nine resources, one region, one resource group. Everything either scales to
+zero, sits inside a free monthly grant, or is the smallest SKU its service
+offers. No AKS, no Front Door, no Redis, no private endpoints — each is a real
+production component and each is a standing charge.
+
+Three decisions carry most of the saving: `min_replicas = 0` on both container
+apps (holding Keycloak warm alone is ~34 USD/month, a third of the credit);
+GitHub Container Registry instead of ACR Basic's fixed ~5 USD/month; and one
+PostgreSQL server hosting both the warehouse and Keycloak's store, because
+Flexible Server bills per server.
+
+The AI layer defaults to `TRANSFEROPS_AI_PROVIDER=mock` — no key, no credits,
+and every AI surface still works. Similarity and delay-risk never used a model
+in the first place: both are deterministic and live in SQL and Python.
+
+Tear it all down with `./scripts/destroy-azure-student.sh`.
+
+| | |
+| --- | --- |
+| [azure/architecture.md](azure/architecture.md) | what is deployed and why each choice |
+| [azure/cost-strategy.md](azure/cost-strategy.md) | what each component costs, and the arithmetic |
+| [azure/security.md](azure/security.md) | what holds, and what deliberately does not |
+| [azure/migration-to-enterprise.md](azure/migration-to-enterprise.md) | SKU change vs real work |
+| [docs/azure-deployment.md](docs/azure-deployment.md) | step by step, and troubleshooting |
+| [docs/openai-configuration.md](docs/openai-configuration.md) | providers, mock mode, cost controls |
+| [docs/cost-controls.md](docs/cost-controls.md) | operator guide to staying inside the credit |
+
 ## Deploy to PostgreSQL
 
 ```bash
