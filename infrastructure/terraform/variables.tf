@@ -41,6 +41,13 @@ variable "location" {
   default     = "westeurope"
 }
 
+variable "resource_group_location" {
+  description = "Metadata location for the resource group. This may differ from the workload region when an existing resource group is retained."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
 variable "owner" {
   description = "Tag value identifying who owns the demo stack."
   type        = string

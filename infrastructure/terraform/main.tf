@@ -70,7 +70,7 @@ module "resource_group" {
   source = "./modules/resource-group"
 
   name                  = "rg-transfer-intelligence-${var.environment}"
-  location              = var.location
+  location              = coalesce(var.resource_group_location, var.location)
   tags                  = local.tags
   budget_amount         = var.monthly_budget_amount
   budget_time_grain     = var.budget_time_grain
@@ -81,13 +81,13 @@ module "resource_group" {
 module "monitoring" {
   source = "./modules/monitoring"
 
-  workspace_name       = format(local.name_prefix, "logs")
-  app_insights_name    = format(local.name_prefix, "monitor")
-  resource_group_name  = module.resource_group.name
-  location             = var.location
-  tags                 = local.tags
-  retention_in_days    = var.log_retention_days
-  daily_quota_gb       = var.log_daily_quota_gb
+  workspace_name      = format(local.name_prefix, "logs")
+  app_insights_name   = format(local.name_prefix, "monitor")
+  resource_group_name = module.resource_group.name
+  location            = var.location
+  tags                = local.tags
+  retention_in_days   = var.log_retention_days
+  daily_quota_gb      = var.log_daily_quota_gb
 }
 
 # ---- Blob storage ----------------------------------------------------------
@@ -104,16 +104,16 @@ module "storage" {
 module "database" {
   source = "./modules/database"
 
-  server_name             = format(local.name_prefix, "db")
-  resource_group_name     = module.resource_group.name
-  location                = var.location
-  tags                    = local.tags
-  sku_name                = var.postgres_sku_name
-  storage_mb              = var.postgres_storage_mb
-  backup_retention_days   = var.postgres_backup_retention_days
-  administrator_login     = var.postgres_admin_username
-  administrator_password  = random_password.postgres_admin.result
-  allowed_client_ip       = var.allowed_client_ip
+  server_name            = format(local.name_prefix, "db")
+  resource_group_name    = module.resource_group.name
+  location               = var.location
+  tags                   = local.tags
+  sku_name               = var.postgres_sku_name
+  storage_mb             = var.postgres_storage_mb
+  backup_retention_days  = var.postgres_backup_retention_days
+  administrator_login    = var.postgres_admin_username
+  administrator_password = random_password.postgres_admin.result
+  allowed_client_ip      = var.allowed_client_ip
 }
 
 # ---- Managed identity and Key Vault ----------------------------------------
@@ -128,14 +128,15 @@ module "identity" {
   enable_key_vault    = var.enable_key_vault
   storage_account_id  = module.storage.account_id
 
-  secrets = var.enable_key_vault ? {
+  secrets = var.enable_key_vault ? merge({
     "postgres-admin-password" = random_password.postgres_admin.result
     "db-reader-password"      = random_password.db_reader.result
     "db-auditor-password"     = random_password.db_auditor.result
     "db-ai-password"          = random_password.db_ai.result
     "keycloak-admin-password" = random_password.keycloak_admin.result
-    "ai-api-key"              = var.ai_api_key
-  } : {}
+    }, var.ai_api_key != "" ? {
+    "ai-api-key" = var.ai_api_key
+  } : {}) : {}
 }
 
 # ---- Container registry (optional; off by default) -------------------------
@@ -176,11 +177,11 @@ module "container_app" {
   identity_id                = module.identity.identity_id
   identity_client_id         = module.identity.client_id
 
-  image                   = var.api_image
-  registry_server         = var.use_acr ? azurerm_container_registry.this[0].login_server : var.image_registry_server
-  registry_username       = var.image_registry_username
-  registry_password       = var.image_registry_password
-  registry_uses_identity  = var.use_acr
+  image                  = var.api_image
+  registry_server        = var.use_acr ? azurerm_container_registry.this[0].login_server : var.image_registry_server
+  registry_username      = var.image_registry_username
+  registry_password      = var.image_registry_password
+  registry_uses_identity = var.use_acr
 
   min_replicas = var.api_min_replicas
   max_replicas = var.api_max_replicas

@@ -54,7 +54,7 @@ resource "azurerm_key_vault" "this" {
   tenant_id           = data.azurerm_client_config.current.tenant_id
   sku_name            = "standard"
 
-  enable_rbac_authorization = true
+  rbac_authorization_enabled = true
 
   # Seven days is the minimum retention. It exists so a fat-fingered destroy is
   # recoverable; it also means the vault name is reserved for a week, which is
@@ -84,14 +84,14 @@ resource "azurerm_role_assignment" "app_secrets_user" {
 }
 
 resource "azurerm_key_vault_secret" "secrets" {
-  # An empty value is a real state -- ai-api-key is blank in mock mode -- and
-  # Key Vault rejects empty secrets, so those are skipped rather than faked.
-  for_each = var.enable_key_vault ? {
-    for k, v in var.secrets : k => v if v != ""
-  } : {}
+  # Resource instance keys must never be derived from secret values: Terraform
+  # rejects that because keys are printed in plans and state addresses. The
+  # caller omits optional empty secrets, so only the non-sensitive key set is
+  # needed here while each value remains sensitive end-to-end.
+  for_each = var.enable_key_vault ? toset(nonsensitive(keys(var.secrets))) : toset([])
 
-  name         = each.key
-  value        = each.value
+  name         = each.value
+  value        = var.secrets[each.value]
   key_vault_id = azurerm_key_vault.this[0].id
 
   depends_on = [azurerm_role_assignment.deployer_secrets_officer]
