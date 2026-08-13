@@ -153,6 +153,149 @@ jobs:
           docker push "$REGISTRY/$REPOSITORY:$TAG"
           docker push "$REGISTRY/$REPOSITORY:latest"
 
+      # One helper for both SSM documents below, because the naive version has
+      # two failure modes worth avoiding.
+      #
+      #   * `aws ssm wait command-executed` exits non-zero when the command
+      #     fails, and under `set -e` that aborts the step before anything is
+      #     printed -- a failed deploy with no reason on screen.
+      #   * That waiter also gives up after ~100 seconds. The Keycloak rollout
+      #     pulls an image and restarts a JVM; the warehouse load pulls an image
+      #     and runs the whole ETL. Both routinely take longer, and the waiter
+      #     would report failure on a command that was still running.
+      #
+      # So: poll to an explicit deadline, always print, then decide.
+      - name: Install the SSM runner
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/ssm-run.sh" <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -uo pipefail
+          instance="$1"; document="$2"; parameters="$3"; timeout="${4:-600}"
+
+          id=$(aws ssm send-command --instance-ids "$instance" \
+                 --document-name "$document" --parameters "$parameters" \
+                 --query 'Command.CommandId' --output text) || exit 1
+          echo "$document -> command $id (waiting up to ${timeout}s)"
+
+          # get-command-invocation reports InvocationDoesNotExist for a moment
+          # after send-command returns, which is not an error.
+          status=Pending
+          deadline=$(( SECONDS + timeout ))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            status=$(aws ssm get-command-invocation --command-id "$id" \
+                       --instance-id "$instance" --query Status --output text 2>/dev/null || echo Pending)
+            case "$status" in Success|Failed|Cancelled|TimedOut) break ;; esac
+            sleep 10
+          done
+
+          echo "--- stdout ---"
+          aws ssm get-command-invocation --command-id "$id" --instance-id "$instance" \
+            --query StandardOutputContent --output text || true
+          if [ "$status" != "Success" ]; then
+            echo "--- stderr ---"
+            aws ssm get-command-invocation --command-id "$id" --instance-id "$instance" \
+              --query StandardErrorContent --output text || true
+            echo "::error::$document finished with status $status"
+            exit 1
+          fi
+          echo "$document: Success"
+          SCRIPT
+          chmod +x "$RUNNER_TEMP/ssm-run.sh"
+
+      - name: Roll Keycloak through SSM
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPOSITORY: ${{ secrets.AWS_ECR_KEYCLOAK_REPOSITORY }}
+          TAG: ${{ github.sha }}
+          INSTANCE: ${{ secrets.AWS_KEYCLOAK_INSTANCE }}
+          DOCUMENT: ${{ secrets.AWS_KEYCLOAK_ROLLOUT_DOCUMENT }}
+          PUBLIC_URL: ${{ vars.AWS_KEYCLOAK_URL }}
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/ssm-run.sh" "$INSTANCE" "$DOCUMENT" \
+            "ImageUri=$REGISTRY/$REPOSITORY:$TAG,PublicUrl=$PUBLIC_URL" 900
+
+      # ---- The warehouse ------------------------------------------------------
+      #
+      # Deploying code without deploying the schema it queries is how a green
+      # pipeline produces a broken console. RDS is private and has no public
+      # address, so a runner cannot reach it directly; the load runs inside the
+      # VPC on the Keycloak/NAT host, from the image that was just pushed and
+      # tested, through a fixed SSM document that accepts an image URI and
+      # nothing else.
+      #
+      # Not on every push, because a load rebuilds the warehouse and drops any
+      # tr_gov entitlement granted since the last one. Only when the schema or
+      # the pipeline actually changed -- or when asked.
+      - name: Decide whether the warehouse needs loading
+        id: decision
+        env:
+          REQUESTED: ${{ inputs.seed_warehouse }}
+          BEFORE: ${{ github.event.before }}
+          CURRENT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          decide() {
+            if [ "${REQUESTED:-false}" = "true" ]; then
+              echo "requested explicitly"; return 0
+            fi
+            # A first push, a force-push or a re-run can leave no usable base.
+            # The load is deterministic and idempotent, so when the diff cannot
+            # be computed the safe answer is to load rather than to skip.
+            if [ -z "${BEFORE:-}" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+              echo "no previous commit to compare against"; return 0
+            fi
+            if ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+              echo "previous commit ${BEFORE} is not in this clone"; return 0
+            fi
+            if git diff --name-only "$BEFORE" "$CURRENT" | grep -Eq '^(sql|etl)/'; then
+              echo "sql/ or etl/ changed"; return 0
+            fi
+            return 1
+          }
+          if reason=$(decide); then
+            echo "seed=true" >> "$GITHUB_OUTPUT"
+            echo "Loading the warehouse: ${reason}."
+          else
+            echo "seed=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping the warehouse load: no change under sql/ or etl/."
+          fi
+
+      - name: Load the warehouse through SSM
+        if: steps.decision.outputs.seed == 'true'
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPOSITORY: ${{ secrets.AWS_ECR_API_REPOSITORY }}
+          TAG: ${{ github.sha }}
+          INSTANCE: ${{ secrets.AWS_KEYCLOAK_INSTANCE }}
+          DOCUMENT: ${{ secrets.AWS_WAREHOUSE_SEED_DOCUMENT }}
+          # A reload drops the tr_gov entitlements. Naming the operator here
+          # re-grants the demo account in the same command, so the console shows
+          # data instead of an empty, correctly-enforced scope.
+          OPERATOR: ${{ vars.TRANSFEROPS_OPERATOR }}
+        run: |
+          set -euo pipefail
+          [ -n "$DOCUMENT" ] || {
+            echo "::error::AWS_WAREHOUSE_SEED_DOCUMENT is not set. Re-run scripts/setup-github-actions.sh."
+            exit 1
+          }
+          PARAMETERS="ImageUri=$REGISTRY/$REPOSITORY:$TAG"
+          # An `[ ... ] && ...` one-liner would return 1 when the operator is
+          # unset and abort the step under `set -e`.
+          if [ -n "${OPERATOR:-}" ]; then
+            PARAMETERS="$PARAMETERS,Operator=$OPERATOR"
+          fi
+          # The ETL pulls the image, generates the portfolio and runs every
+          # data-quality gate; the document's own ceiling is 1800s.
+          "$RUNNER_TEMP/ssm-run.sh" "$INSTANCE" "$DOCUMENT" "$PARAMETERS" 1800
+
+      # Last, and deliberately after the warehouse load above.
+      #
+      # Rolling the functions first would put code that expects a new column
+      # live against a database that does not have it yet, and every request in
+      # that window fails. Loading first means the only overlap is the old code
+      # against the new schema, which additive changes tolerate.
       - name: Roll the Lambda functions
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
@@ -170,40 +313,56 @@ jobs:
             echo "$fn -> $IMAGE"
           done
 
-      - name: Roll Keycloak through SSM
-        env:
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-          REPOSITORY: ${{ secrets.AWS_ECR_KEYCLOAK_REPOSITORY }}
-          TAG: ${{ github.sha }}
-          INSTANCE: ${{ secrets.AWS_KEYCLOAK_INSTANCE }}
-          DOCUMENT: ${{ secrets.AWS_KEYCLOAK_ROLLOUT_DOCUMENT }}
-          PUBLIC_URL: ${{ vars.AWS_KEYCLOAK_URL }}
-        run: |
-          set -euo pipefail
-          COMMAND=$(aws ssm send-command --instance-ids "$INSTANCE" \
-            --document-name "$DOCUMENT" \
-            --parameters "ImageUri=$REGISTRY/$REPOSITORY:$TAG,PublicUrl=$PUBLIC_URL" \
-            --query 'Command.CommandId' --output text)
-          aws ssm wait command-executed --command-id "$COMMAND" --instance-id "$INSTANCE"
-          aws ssm get-command-invocation --command-id "$COMMAND" --instance-id "$INSTANCE" \
-            --query '{Status:Status,Output:StandardOutputContent}' --output table
-
+      # /health is the right probe here, not /healthz: it does a real query
+      # against tr_core and returns the row count and the warehouse vintage. A
+      # 200 therefore proves the whole chain in one call -- the function is
+      # running, it reached RDS across the private subnet through the NAT
+      # instance, and the warehouse actually has data in it.
+      #
+      # 503 means the function is up but cannot see the warehouse, which is a
+      # different bug from a function that will not start, so both are reported.
       - name: Smoke test
+        id: smoke
         env:
           API_URL: ${{ vars.AWS_API_URL }}
         run: |
           set -euo pipefail
           [ -n "$API_URL" ] || { echo "AWS_API_URL not set; skipping"; exit 0; }
-          for attempt in $(seq 1 10); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${API_URL%/}/healthz" || true)
-            # 200 means up. 503 means the function is running but cannot reach
-            # the warehouse, which is a different failure and worth surfacing.
+          URL="${API_URL%/}/health"
+          for attempt in $(seq 1 12); do
+            body=$(curl -s --max-time 25 -w '\n%{http_code}' "$URL" || true)
+            code=$(printf '%s' "$body" | tail -n1)
+            payload=$(printf '%s' "$body" | sed '$d')
             if [ "$code" = "200" ]; then
-              echo "healthy after ${attempt} attempt(s)"
+              echo "healthy after ${attempt} attempt(s): $payload"
+              # A stray newline in a step output silently corrupts the file.
+              echo "health=$(printf '%s' "$payload" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "attempt ${attempt}: HTTP ${code:-none}"
-            sleep 6
+            echo "attempt ${attempt}: HTTP ${code:-none} ${payload:-}"
+            sleep 10
           done
-          echo "::error::API did not become healthy at ${API_URL%/}/healthz"
+          echo "::error::API did not become healthy at ${URL}"
           exit 1
+
+      - name: Summary
+        if: always()
+        env:
+          CONSOLE_URL: ${{ vars.AWS_CONSOLE_URL }}
+          API_URL: ${{ vars.AWS_API_URL }}
+          KEYCLOAK_URL: ${{ vars.AWS_KEYCLOAK_URL }}
+          SEEDED: ${{ steps.decision.outputs.seed }}
+          HEALTH: ${{ steps.smoke.outputs.health }}
+        run: |
+          {
+            echo "### Backend deployed"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Image tag | \`${{ github.sha }}\` |"
+            echo "| Warehouse reloaded | ${SEEDED:-false} |"
+            echo "| Health | ${HEALTH:-not checked} |"
+            echo "| Console | ${CONSOLE_URL:-—} |"
+            echo "| API | ${API_URL:-—} |"
+            echo "| Keycloak | ${KEYCLOAK_URL:-—} |"
+          } >> "$GITHUB_STEP_SUMMARY"

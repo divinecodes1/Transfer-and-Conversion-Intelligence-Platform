@@ -1,0 +1,143 @@
+name: Deploy
+
+# The whole platform, in one run, in the right order.
+#
+#   backend   test -> build -> push -> roll Lambda -> roll Keycloak -> load the
+#             warehouse (when the schema changed) -> health check
+#   console   build -> publish to S3 -> invalidate CloudFront
+#   verify    all three tiers answering, and answering consistently
+#
+# Ordering is the reason this workflow exists rather than letting the two
+# path-triggered workflows race. The console is compiled against the API's URL
+# and signs in against Keycloak's issuer; publishing it before the API that
+# serves it means the first person to open the demo sees a broken page.
+#
+# This does NOT provision infrastructure. Terraform state is local to the
+# operator (see infrastructure/aws/providers.tf), and the CI role deliberately
+# holds no permission to create a VPC, an RDS instance or an IAM role -- it can
+# push images, roll the functions it owns, publish the console and run two fixed
+# SSM documents, and nothing else in the account. Run
+# scripts/deploy-aws-student.ps1 (or .sh) once to create the stack; from then on
+# every deployment is this workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed_warehouse:
+        description: "Reload the deployed warehouse (drops entitlements granted since the last load)"
+        type: boolean
+        default: false
+
+# Deployments queue rather than cancel. Cancelling mid-run can leave the API
+# rolled and the console not, which is the one state worth avoiding.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  backend:
+    uses: ./.github/workflows/backend.yml
+    with:
+      deploy: true
+      seed_warehouse: ${{ inputs.seed_warehouse }}
+    secrets: inherit
+    permissions:
+      id-token: write
+      contents: read
+
+  console:
+    needs: backend
+    uses: ./.github/workflows/frontend.yml
+    secrets: inherit
+    permissions:
+      id-token: write
+      contents: read
+
+  # No AWS credentials here on purpose. This job checks what a visitor sees, so
+  # it uses nothing a visitor would not have.
+  verify:
+    needs: [backend, console]
+    runs-on: ubuntu-latest
+    steps:
+      - name: The console is served
+        env:
+          CONSOLE_URL: ${{ vars.AWS_CONSOLE_URL }}
+        run: |
+          set -euo pipefail
+          [ -n "$CONSOLE_URL" ] || { echo "::error::AWS_CONSOLE_URL is not set"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 25 "$CONSOLE_URL")
+          [ "$code" = "200" ] || { echo "::error::console returned $code"; exit 1; }
+          echo "console 200"
+
+      - name: The API is serving governed data
+        id: api
+        env:
+          API_URL: ${{ vars.AWS_API_URL }}
+        run: |
+          set -euo pipefail
+          [ -n "$API_URL" ] || { echo "::error::AWS_API_URL is not set"; exit 1; }
+          payload=$(curl -sf --max-time 30 "${API_URL%/}/health")
+          echo "$payload"
+          # A warehouse with no projects in it is a successful deployment of
+          # nothing, and every screen in the console would be empty.
+          projects=$(printf '%s' "$payload" | jq -r '.projects // 0')
+          [ "$projects" -gt 0 ] || { echo "::error::the warehouse reports $projects projects"; exit 1; }
+          echo "projects=$projects" >> "$GITHUB_OUTPUT"
+          echo "vintage=$(printf '%s' "$payload" | jq -r '.data_as_of // "unknown"')" >> "$GITHUB_OUTPUT"
+
+      # The classic failure of a Keycloak behind a proxy: it boots, it answers,
+      # and it advertises an issuer of http://<private-ip>:8080 because KC_HOSTNAME
+      # was not applied. Every token it then mints is rejected by the API, and
+      # the only symptom is that nobody can sign in. Catch it here.
+      - name: Keycloak advertises the public issuer
+        env:
+          KEYCLOAK_URL: ${{ vars.AWS_KEYCLOAK_URL }}
+          REALM: ${{ vars.VITE_KEYCLOAK_REALM }}
+        run: |
+          set -euo pipefail
+          [ -n "$KEYCLOAK_URL" ] || { echo "::error::AWS_KEYCLOAK_URL is not set"; exit 1; }
+          realm="${REALM:-transferops}"
+          base="${KEYCLOAK_URL%/}"
+          discovery="$base/realms/$realm/.well-known/openid-configuration"
+
+          # The JVM may still be starting after an image roll.
+          for attempt in $(seq 1 12); do
+            if payload=$(curl -sf --max-time 20 "$discovery"); then break; fi
+            echo "attempt ${attempt}: realm not answering yet"
+            payload=""
+            sleep 10
+          done
+          [ -n "$payload" ] || { echo "::error::realm '$realm' never answered at $discovery"; exit 1; }
+
+          issuer=$(printf '%s' "$payload" | jq -r '.issuer')
+          expected="$base/realms/$realm"
+          if [ "$issuer" != "$expected" ]; then
+            echo "::error::issuer is '$issuer' but tokens must be issued as '$expected'; KC_HOSTNAME did not take effect"
+            exit 1
+          fi
+          echo "issuer $issuer"
+
+      - name: Summary
+        env:
+          CONSOLE_URL: ${{ vars.AWS_CONSOLE_URL }}
+          API_URL: ${{ vars.AWS_API_URL }}
+          KEYCLOAK_URL: ${{ vars.AWS_KEYCLOAK_URL }}
+          PROJECTS: ${{ steps.api.outputs.projects }}
+          VINTAGE: ${{ steps.api.outputs.vintage }}
+        run: |
+          {
+            echo "## Deployed end to end"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Console | $CONSOLE_URL |"
+            echo "| API | ${API_URL%/}/docs |"
+            echo "| Identity | $KEYCLOAK_URL |"
+            echo "| Projects in the warehouse | $PROJECTS |"
+            echo "| Data vintage | $VINTAGE |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

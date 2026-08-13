@@ -41,6 +41,30 @@ docker build -f "$ROOT/infrastructure/docker/keycloak/Dockerfile" -t "$KC_REPO:l
 docker push "$API_REPO:latest"
 docker push "$KC_REPO:latest"
 
+# The IAM OIDC provider and the CI deployment role are only created when
+# github_repository is set -- and when it is not, nothing fails. The apply
+# succeeds, the stack works, and CI simply has no role to assume, which is not
+# discovered until setup-github-actions.sh cannot find one. Resolve it here.
+step "Resolving the repository allowed to deploy from CI"
+tfvars_repository() {
+  [[ -f "$APP/terraform.tfvars" ]] || return 0
+  sed -n 's/^[[:space:]]*github_repository[[:space:]]*=[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$APP/terraform.tfvars" | head -1
+}
+if [[ -n "${TF_VAR_github_repository:-}" ]]; then
+  printf '  %s (from TF_VAR_github_repository)\n' "$TF_VAR_github_repository"
+elif [[ -n "$(tfvars_repository)" ]]; then
+  printf '  %s (from terraform.tfvars)\n' "$(tfvars_repository)"
+elif command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
+  TF_VAR_github_repository="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
+  export TF_VAR_github_repository
+  printf '  %s (detected with gh)\n' "$TF_VAR_github_repository"
+else
+  printf 'WARNING: github_repository is not set and gh is unavailable.\n'
+  printf '         The stack will deploy, but GitHub Actions will have no role to assume.\n'
+  printf '         Add to %s/terraform.tfvars and re-run:\n' "$APP"
+  printf '           github_repository = "owner/name"\n'
+fi
+
 step "Stage 2/2: creating private application resources"
 terraform -chdir="$APP" init -input=false
 terraform -chdir="$APP" apply -input=false -auto-approve \
@@ -90,3 +114,11 @@ aws cloudfront create-invalidation --distribution-id "$DIST" --paths '/*' >/dev/
 step "Deployment complete"
 printf 'Console:   %s\nAPI:       %s\nAssistant: %s\nKeycloak:  %s\n' "$CONSOLE_URL" "$API_URL" "$AGENT_URL" "$KC_URL"
 terraform -chdir="$APP" output -raw cost_posture
+
+# This script exists to create the stack once. Every deployment after this one
+# should come from CI, which needs the outputs above published to the
+# repository -- that is the next command, and it is not optional if you want
+# `git push` to deploy.
+printf '\n\nHand the deployment over to GitHub Actions:\n'
+printf '  ./scripts/setup-github-actions.sh\n'
+printf '  gh workflow run deploy.yml\n\n'

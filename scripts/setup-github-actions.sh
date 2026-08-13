@@ -65,6 +65,7 @@ REFRESH_FN="$(tf refresh_function_name)"
 ASSISTANT_FN="$(tf assistant_function_name)"
 KEYCLOAK_INSTANCE="$(tf keycloak_instance_id)"
 KEYCLOAK_ROLLOUT_DOCUMENT="$(tf keycloak_rollout_document)"
+WAREHOUSE_SEED_DOCUMENT="$(tf warehouse_seed_document)"
 
 # ECR repository names, not URLs: amazon-ecr-login supplies the registry host.
 API_REPO="$(basename "$(tf ecr_api_repository)")"
@@ -103,6 +104,9 @@ set_secret AWS_REFRESH_FUNCTION            "${REFRESH_FN}"
 set_secret AWS_ASSISTANT_FUNCTION          "${ASSISTANT_FN}"
 set_secret AWS_KEYCLOAK_INSTANCE           "${KEYCLOAK_INSTANCE}"
 set_secret AWS_KEYCLOAK_ROLLOUT_DOCUMENT   "${KEYCLOAK_ROLLOUT_DOCUMENT}"
+# RDS is private, so CI loads the warehouse by running this fixed document on
+# the in-VPC host. Without it a schema change never reaches the deployment.
+set_secret AWS_WAREHOUSE_SEED_DOCUMENT     "${WAREHOUSE_SEED_DOCUMENT}"
 set_secret AWS_CONSOLE_BUCKET              "${CONSOLE_BUCKET}"
 set_secret AWS_CLOUDFRONT_DISTRIBUTION_ID  "${DIST_ID}"
 
@@ -136,6 +140,18 @@ set_var VITE_TRANSFEROPS_AUTH   "oidc"
 # a job even though it looks like it should.
 set_var AWS_DEPLOY_ENABLED "true"
 
+# Optional. A warehouse reload rebuilds tr_gov, which drops the entitlements
+# granted to accounts registered since the last load -- including yours, leaving
+# a console that is correctly enforcing an empty scope. Naming the demo account
+# here re-grants it as part of the same load.
+#
+#   TRANSFEROPS_OPERATOR=you@example.com ./scripts/setup-github-actions.sh
+if [[ -n "${TRANSFEROPS_OPERATOR:-}" ]]; then
+  set_var TRANSFEROPS_OPERATOR "${TRANSFEROPS_OPERATOR}"
+else
+  warn "skip    TRANSFEROPS_OPERATOR (set it to keep your account entitled across a warehouse reload)"
+fi
+
 # ---- 5. Summary -------------------------------------------------------------
 step "Done"
 
@@ -153,8 +169,14 @@ cat <<SUMMARY
     gh secret list --repo ${GH_REPO}
     gh variable list --repo ${GH_REPO}
 
-  Then push, or run a workflow by hand:
-    gh workflow run backend.yml
-    gh workflow run frontend.yml
+  Deploy everything, in order, and verify all three tiers:
+    gh workflow run deploy.yml
+
+  Force a warehouse reload with it (drops entitlements granted since the last
+  load; TRANSFEROPS_OPERATOR above is re-granted automatically):
+    gh workflow run deploy.yml -f seed_warehouse=true
+
+  Or let a push do it. backend.yml and frontend.yml run on their own paths, and
+  backend.yml reloads the warehouse by itself whenever sql/ or etl/ changed.
 
 SUMMARY

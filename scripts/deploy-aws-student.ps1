@@ -61,6 +61,33 @@ Assert-Native 'Lambda image push'
 docker push "${KcRepo}:latest"
 Assert-Native 'Keycloak image push'
 
+# The IAM OIDC provider and the CI deployment role are only created when
+# github_repository is set -- and when it is not, nothing fails. The apply
+# succeeds, the stack works, and CI simply has no role to assume, which is not
+# discovered until setup-github-actions.ps1 cannot find one. Resolve it here.
+Write-Host "`n==> Resolving the repository allowed to deploy from CI"
+$TfvarsPath = Join-Path $App 'terraform.tfvars'
+$TfvarsRepository = ''
+if (Test-Path $TfvarsPath) {
+  $match = Select-String -Path $TfvarsPath -Pattern '^\s*github_repository\s*=\s*"(.+)"\s*$' | Select-Object -First 1
+  if ($match) { $TfvarsRepository = $match.Matches[0].Groups[1].Value }
+}
+if ($env:TF_VAR_github_repository) {
+  Write-Host "  $($env:TF_VAR_github_repository) (from TF_VAR_github_repository)"
+} elseif ($TfvarsRepository) {
+  Write-Host "  $TfvarsRepository (from terraform.tfvars)"
+} elseif (Get-Command gh -ErrorAction SilentlyContinue) {
+  $detected = gh repo view --json nameWithOwner -q .nameWithOwner 2>$null
+  if ($LASTEXITCODE -eq 0 -and $detected) {
+    $env:TF_VAR_github_repository = $detected.Trim()
+    Write-Host "  $($env:TF_VAR_github_repository) (detected with gh)"
+  } else {
+    Write-Warning 'github_repository is not set and gh is not authenticated. GitHub Actions will have no role to assume.'
+  }
+} else {
+  Write-Warning "github_repository is not set. The stack will deploy, but GitHub Actions will have no role to assume. Add github_repository = `"owner/name`" to $TfvarsPath and re-run."
+}
+
 Write-Host "`n==> Stage 2/2: application resources"
 terraform -chdir=$App init -input=false
 Assert-Native 'Terraform application init'
@@ -120,3 +147,11 @@ Write-Host "`nDeployment complete"
 Write-Host "Console:   $ConsoleUrl`nAPI:       $ApiUrl`nAssistant: $AgentUrl`nKeycloak:  $KcUrl"
 terraform -chdir=$App output -raw cost_posture
 Assert-Native 'Terraform output'
+
+# This script exists to create the stack once. Every deployment after this one
+# should come from CI, which needs the outputs above published to the
+# repository -- that is the next command, and it is not optional if you want
+# `git push` to deploy.
+Write-Host "`n`nHand the deployment over to GitHub Actions:"
+Write-Host "  .\scripts\setup-github-actions.ps1"
+Write-Host "  gh workflow run deploy.yml`n"

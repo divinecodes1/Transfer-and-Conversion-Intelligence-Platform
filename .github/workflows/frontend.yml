@@ -20,6 +20,8 @@ on:
     paths:
       - "web/**"
   workflow_dispatch:
+  # Called by deploy.yml so the console is published after the API it talks to.
+  workflow_call:
 
 concurrency:
   group: frontend-${{ github.ref }}

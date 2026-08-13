@@ -1,9 +1,13 @@
 name: Infrastructure validation
 
-# Terraform state is intentionally local for this Free Plan stack. CI therefore
-# validates both roots but never pretends it can safely plan/apply without the
-# operator's state. Provision with deploy-aws-student.ps1/.sh; backend.yml owns
-# repeatable image and Keycloak rollouts after that first deployment.
+# Terraform state is intentionally local for this Free Plan stack, and the CI
+# role deliberately holds no permission to create a VPC, an RDS instance or an
+# IAM role. So CI validates both roots and never pretends it can plan or apply
+# without the operator's state.
+#
+# Provision once with deploy-aws-student.ps1/.sh. After that, deploy.yml owns
+# every deployment: images, all three Lambda functions, the Keycloak rollout,
+# the warehouse load and the console.
 
 on:
   push:
