@@ -19,6 +19,14 @@
 # that and nothing else. There is no long-lived secret to leak or rotate.
 # ============================================================================
 
+# Split once, so the immutable-subject patterns below can interpolate the owner
+# and repository separately. `try` keeps this evaluable when github_repository
+# is empty -- locals are resolved even where every resource here is count = 0.
+locals {
+  github_owner = try(split("/", var.github_repository)[0], "")
+  github_name  = try(split("/", var.github_repository)[1], "")
+}
+
 # The thumbprint argument is no longer required -- IAM validates GitHub's OIDC
 # certificate against its own trust store -- so it is deliberately omitted
 # rather than pinned to a value that expires and breaks the deployment.
@@ -60,12 +68,28 @@ data "aws_iam_policy_document" "github_assume" {
     # `environment:production-demo` is listed because the deploy jobs declare
     # that environment and GitHub puts it in the subject; without it those jobs
     # fail even though the branch pattern matches.
+    #
+    # Two shapes are listed because GitHub now mints *immutable* subjects that
+    # embed the numeric owner and repository ids:
+    #
+    #   repo:owner/name:environment:x              legacy
+    #   repo:owner@46629508/name@1332479589:...    immutable
+    #
+    # A policy written for the legacy shape alone matches nothing and every
+    # deploy fails with "Not authorized to perform sts:AssumeRoleWithWebIdentity"
+    # while looking entirely correct -- the ids are only visible in CloudTrail.
+    # The ids are wildcarded so this module stays portable; owner and repository
+    # names are still matched exactly, which is the guarantee the legacy form
+    # gave. Pin the ids if you want a rename to revoke access, which is the
+    # reason GitHub introduced the format.
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
         "repo:${var.github_repository}:environment:production-demo",
         "repo:${var.github_repository}:ref:refs/heads/main",
+        "repo:${local.github_owner}@*/${local.github_name}@*:environment:production-demo",
+        "repo:${local.github_owner}@*/${local.github_name}@*:ref:refs/heads/main",
       ]
     }
   }

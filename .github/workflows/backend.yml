@@ -288,7 +288,21 @@ jobs:
           fi
           # The ETL pulls the image, generates the portfolio and runs every
           # data-quality gate; the document's own ceiling is 1800s.
-          "$RUNNER_TEMP/ssm-run.sh" "$INSTANCE" "$DOCUMENT" "$PARAMETERS" 1800
+          #
+          # The output is captured as well as printed so the loaded row count can
+          # be asserted here. A warehouse with no projects in it is a successful
+          # deployment of nothing, and every screen in the console would be empty.
+          # This is the right place for that check: the deploy-time verification
+          # holds no credentials, and /health is entitlement-scoped and refuses
+          # an anonymous caller under enforce.
+          output=$("$RUNNER_TEMP/ssm-run.sh" "$INSTANCE" "$DOCUMENT" "$PARAMETERS" 1800 | tee /dev/stderr)
+          projects=$(printf '%s' "$output" \
+            | sed -n 's/.*Loaded warehouse (postgres): \([0-9][0-9]*\) projects.*/\1/p' | tail -1)
+          if [ -z "$projects" ] || [ "$projects" -eq 0 ]; then
+            echo "::error::the warehouse load reported no projects"
+            exit 1
+          fi
+          echo "warehouse loaded with $projects projects"
 
       # Last, and deliberately after the warehouse load above.
       #

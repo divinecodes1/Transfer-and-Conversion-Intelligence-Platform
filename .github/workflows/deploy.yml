@@ -73,21 +73,28 @@ jobs:
           [ "$code" = "200" ] || { echo "::error::console returned $code"; exit 1; }
           echo "console 200"
 
-      - name: The API is serving governed data
+      # /healthz, not /health. Both round-trip the warehouse, but /health is a
+      # governed endpoint: its project count is entitlement-scoped, so it varies
+      # by caller, and it refuses an anonymous one under TRANSFEROPS_AUTH=enforce
+      # -- which this job deliberately is. Asserting it here would either fail
+      # forever or require weakening the auth posture that
+      # tests/security_checks.py exists to hold.
+      #
+      # The "a warehouse with no projects is a successful deployment of nothing"
+      # guarantee has not been dropped; it moved to the backend job's warehouse
+      # load, which reports the loaded row count and already holds credentials.
+      - name: The API is answering
         id: api
         env:
           API_URL: ${{ vars.AWS_API_URL }}
         run: |
           set -euo pipefail
           [ -n "$API_URL" ] || { echo "::error::AWS_API_URL is not set"; exit 1; }
-          payload=$(curl -sf --max-time 30 "${API_URL%/}/health")
+          payload=$(curl -sf --max-time 30 "${API_URL%/}/healthz")
           echo "$payload"
-          # A warehouse with no projects in it is a successful deployment of
-          # nothing, and every screen in the console would be empty.
-          projects=$(printf '%s' "$payload" | jq -r '.projects // 0')
-          [ "$projects" -gt 0 ] || { echo "::error::the warehouse reports $projects projects"; exit 1; }
-          echo "projects=$projects" >> "$GITHUB_OUTPUT"
-          echo "vintage=$(printf '%s' "$payload" | jq -r '.data_as_of // "unknown"')" >> "$GITHUB_OUTPUT"
+          status=$(printf '%s' "$payload" | jq -r '.status // "unknown"')
+          [ "$status" = "healthy" ] || { echo "::error::the API reports status '$status'"; exit 1; }
+          echo "status=$status" >> "$GITHUB_OUTPUT"
 
       # The classic failure of a Keycloak behind a proxy: it boots, it answers,
       # and it advertises an issuer of http://<private-ip>:8080 because KC_HOSTNAME
@@ -126,8 +133,7 @@ jobs:
           CONSOLE_URL: ${{ vars.AWS_CONSOLE_URL }}
           API_URL: ${{ vars.AWS_API_URL }}
           KEYCLOAK_URL: ${{ vars.AWS_KEYCLOAK_URL }}
-          PROJECTS: ${{ steps.api.outputs.projects }}
-          VINTAGE: ${{ steps.api.outputs.vintage }}
+          API_STATUS: ${{ steps.api.outputs.status }}
         run: |
           {
             echo "## Deployed end to end"
@@ -137,7 +143,6 @@ jobs:
             echo "| Console | $CONSOLE_URL |"
             echo "| API | ${API_URL%/}/docs |"
             echo "| Identity | $KEYCLOAK_URL |"
-            echo "| Projects in the warehouse | $PROJECTS |"
-            echo "| Data vintage | $VINTAGE |"
+            echo "| API health | $API_STATUS |"
             echo "| Commit | \`${{ github.sha }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
