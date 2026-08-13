@@ -2,24 +2,23 @@ name: Infrastructure
 
 # Terraform validation on every change; apply only when a human asks.
 #
-# The asymmetry is deliberate. `plan` is free and safe, so it runs automatically
-# and posts what would change. `apply` creates billable resources on a finite
-# student credit, so it is workflow_dispatch with a typed confirmation -- an
-# infrastructure change that reaches production because someone merged a branch
-# is the failure mode this guards against.
+# The asymmetry is deliberate. `plan` is free and safe, so it runs
+# automatically. `apply` creates billable resources on a finite free tier, so it
+# is workflow_dispatch with a typed confirmation -- infrastructure that reaches
+# production because someone merged a branch is the failure this guards against.
 #
-# `destroy` is here too, gated harder, because the ability to tear the stack
-# down is the most important cost control in the repository.
+# `destroy` is here too, gated the same way, because the ability to tear the
+# stack down is the most important cost control in the repository.
 
 on:
   push:
     branches: [main, master]
     paths:
-      - "infrastructure/**"
+      - "infrastructure/aws/**"
       - ".github/workflows/infrastructure.yml"
   pull_request:
     paths:
-      - "infrastructure/**"
+      - "infrastructure/aws/**"
   workflow_dispatch:
     inputs:
       action:
@@ -35,10 +34,9 @@ on:
 permissions:
   id-token: write
   contents: read
-  pull-requests: write
 
 env:
-  TF_DIR: infrastructure/terraform
+  TF_DIR: infrastructure/aws
   TF_VERSION: "1.9.8"
 
 jobs:
@@ -51,8 +49,8 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      # Formatting and validation need no cloud credentials, so they run on
-      # forks and pull requests where the Azure login would fail.
+      # No cloud credentials needed, so this runs on forks and pull requests
+      # where the role assumption would fail.
       - name: Format
         working-directory: ${{ env.TF_DIR }}
         run: terraform fmt -check -recursive -diff
@@ -67,7 +65,7 @@ jobs:
 
   plan:
     needs: validate
-    if: github.event_name != 'pull_request'
+    if: vars.AWS_DEPLOY_ENABLED == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production-demo
     steps:
@@ -77,22 +75,15 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - uses: azure/login@v2
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Plan
         working-directory: ${{ env.TF_DIR }}
         env:
-          ARM_USE_OIDC: "true"
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_ai_api_key: ${{ secrets.TRANSFEROPS_AI_API_KEY }}
-          TF_VAR_budget_alert_emails: '["${{ vars.BUDGET_ALERT_EMAIL }}"]'
         run: |
           terraform init
           terraform plan -no-color -input=false
@@ -103,8 +94,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: production-demo
     steps:
+      # A dropdown alone is one mis-click. The typed value is the second hand.
       - name: Require confirmation
-        # A dropdown alone is one mis-click. The typed value is the second hand.
         if: inputs.confirm != 'student'
         run: |
           echo "::error::Type 'student' in the confirm field to apply."
@@ -116,22 +107,15 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - uses: azure/login@v2
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Apply
         working-directory: ${{ env.TF_DIR }}
         env:
-          ARM_USE_OIDC: "true"
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_ai_api_key: ${{ secrets.TRANSFEROPS_AI_API_KEY }}
-          TF_VAR_budget_alert_emails: '["${{ vars.BUDGET_ALERT_EMAIL }}"]'
         run: |
           terraform init
           terraform apply -auto-approve -input=false
@@ -158,20 +142,13 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
-      - uses: azure/login@v2
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Destroy
         working-directory: ${{ env.TF_DIR }}
-        env:
-          ARM_USE_OIDC: "true"
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          TF_VAR_subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: |
           terraform init
           terraform destroy -auto-approve -input=false

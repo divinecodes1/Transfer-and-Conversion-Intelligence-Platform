@@ -1,40 +1,39 @@
 name: Backend
 
-# Build, test and ship the API container.
+# Test, build, push to ECR, roll the Lambda functions.
+#
+# Unlike the previous Azure deployment, this one actually deploys. Federated
+# login on AWS is an IAM OIDC provider and a role inside the account, created by
+# the same credentials that create everything else -- no directory administrator,
+# no tenant policy. There is still no stored access key: GitHub mints a
+# short-lived token scoped to this repository and environment.
 #
 # The gates run BEFORE the image is built, not after it is deployed. This repo's
-# whole argument is that a metric is only trustworthy because something proves it
-# reconciles -- shipping an image whose golden gate failed would make the badge a
-# decoration. ci.yml runs the full seventeen-suite matrix against PostgreSQL; this
-# workflow runs the server-free subset, which is what can gate a container build
-# in under two minutes.
-#
-# Images go to GitHub Container Registry, not Azure Container Registry. ACR Basic
-# is a fixed ~5 USD/month on a 100 USD student credit; GHCR is free for public
-# images and Container Apps pulls them without a credential.
+# whole argument is that a metric is trustworthy because something proves it
+# reconciles; shipping an image whose golden gate failed would make the badge a
+# decoration.
 
 on:
   push:
     branches: [main, master]
     paths-ignore:
       - "docs/**"
-      - "azure/**"
+      - "aws/**"
       - "**/*.md"
   workflow_dispatch:
     inputs:
       deploy:
-        description: "Deploy to Azure after building"
+        description: "Deploy after building"
         type: boolean
         default: true
 
 concurrency:
-  # A second push should replace an in-flight deploy, not race it onto the same
-  # Container App revision.
   group: backend-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  IMAGE_NAME: ghcr.io/${{ github.repository }}
+permissions:
+  id-token: write # required to request the OIDC token
+  contents: read
 
 jobs:
   test:
@@ -57,7 +56,6 @@ jobs:
           python etl/generate_data.py
           python etl/run.py --engine duckdb
 
-      # The gates that need no server. Each one is a claim the deployment makes.
       - name: Golden-project reconciliation
         run: python tests/golden_projects.py
       - name: Metric governance
@@ -71,162 +69,105 @@ jobs:
       - name: Console isolation
         run: python tests/web_checks.py
 
-      # Asserts the platform still runs with no model configured. That property
-      # is what makes AI_PROVIDER=mock a supported deployment mode rather than a
-      # fallback nobody tested.
+      # Proves the platform still works with no model configured, which is what
+      # makes mock a supported deployment mode rather than an untested fallback.
       - name: AI degrades without a provider
         env:
           TRANSFEROPS_AI_PROVIDER: mock
-        run: python -c "from ai import gateway; assert gateway.configured(); print('mock provider is configured and needs no credential')"
+        run: python -c "from ai import gateway; assert gateway.configured(); print('mock needs no credential')"
 
-  build:
+  deploy:
     needs: test
+    # Gated on a repository VARIABLE, not a secret: job-level `if:` cannot read
+    # the secrets context, so a missing secret would fail inside the job rather
+    # than skip it.
+    if: vars.AWS_DEPLOY_ENABLED == 'true' && (github.event_name == 'push' || inputs.deploy)
     runs-on: ubuntu-latest
-    permissions:
-      # Read only. `packages: write` was needed when this job published to GHCR;
-      # it builds without pushing now, so the token is narrowed to match. A
-      # permission kept "in case" is a permission nobody notices being used.
-      contents: read
-    outputs:
-      image: ${{ steps.meta.outputs.image }}
-      keycloak_image: ${{ steps.meta.outputs.keycloak_image }}
+    environment: production-demo
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
-
-      # No registry login, because nothing is pushed. See the build steps below.
-      - id: meta
-        run: |
-          # Lower-cased: GHCR rejects an upper-case path, and GitHub org names
-          # frequently have capitals.
-          IMAGE=$(echo "${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')
-          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
-          echo "keycloak_image=${IMAGE}-keycloak" >> "$GITHUB_OUTPUT"
-
-      # BUILT, NOT PUSHED -- and that is deliberate, not an omission.
-      #
-      # The deployment pulls from this subscription's ACR. Pushing there needs a
-      # service principal, and the tenant forbids the app registration one would
-      # require (see scripts/roll-deployment.sh). Pushing to GHCR instead would
-      # publish images nothing consumes: CI minutes spent, public packages left
-      # to rot, and two registries disagreeing about what "latest" means.
-      #
-      # What building still proves, and it is worth a minute of CI: that both
-      # Dockerfiles are valid, that requirements.txt resolves, and that the
-      # Keycloak image completes `kc.sh build`. Those break in ways the test
-      # suite cannot see, and they break the deployment.
-      #
-      # To publish again -- if a tenant admin enables app registration, or you
-      # want GHCR back -- set push: true and restore the login step above.
-      - name: Build the API image
-        uses: docker/build-push-action@v6
+      # No access key. The role's trust policy accepts only a token whose
+      # subject matches this repository and the production-demo environment.
+      - name: Assume the deployment role
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          context: .
-          push: false
-          tags: ${{ steps.meta.outputs.image }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
 
-      # Keycloak carries the realm and the themes, so a broken build here means
-      # a deployment that starts with no realm and cannot authenticate anyone.
-      - name: Build the Keycloak image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: infrastructure/docker/keycloak/Dockerfile
-          push: false
-          tags: ${{ steps.meta.outputs.keycloak_image }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-  deploy:
-    needs: build
-    # Gated on a repository VARIABLE, not a secret: job-level `if:` cannot see
-    # the secrets context, so a missing secret cannot skip a job -- it fails
-    # inside it instead, which is how this workflow was reporting a red build
-    # for a deployment it was never able to perform.
-    #
-    # A managed tenant that forbids app registration (universities commonly do)
-    # means no service principal, so no federated login, so no CI deployment.
-    # Setting this false keeps the valuable half -- tests and published images --
-    # green, and the rollout happens from a machine that already has ARM rights:
-    #   ./scripts/roll-deployment.sh
-    if: vars.AZURE_DEPLOY_ENABLED == 'true' && (github.event_name == 'push' || inputs.deploy)
-    runs-on: ubuntu-latest
-    environment: production-demo
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      # Federated credentials, not a stored client secret. The workflow proves
-      # its identity to Entra with a short-lived OIDC token issued by GitHub, so
-      # there is no long-lived deployment credential to leak or rotate. This is
-      # about the *deployment* identity only -- application sign-in remains
-      # Keycloak.
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Roll the API to the new image
-        run: |
-          set -euo pipefail
-          az containerapp update \
-            --name "${{ secrets.AZURE_CONTAINER_APP }}" \
-            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-            --image "${{ needs.build.outputs.image }}:${{ github.sha }}" \
-            --output none
-          echo "API      -> ${{ needs.build.outputs.image }}:${{ github.sha }}"
-
-      # Rolled to the same commit, so the realm the API validates tokens against
-      # is always the realm this commit describes.
-      #
-      # Keycloak sits at min_replicas 0, so this does not start a replica -- it
-      # updates the revision the next sign-in will cold-start into.
-      - name: Roll Keycloak to the new image
-        # The guard lives in the script, not in `if:` -- the `secrets` context is
-        # not available to step-level conditions, and referencing it there is a
-        # workflow syntax error rather than a falsy check.
+      - name: Build and push the API image
         env:
-          KEYCLOAK_APP: ${{ secrets.AZURE_KEYCLOAK_APP }}
-          KEYCLOAK_IMAGE: ${{ needs.build.outputs.keycloak_image }}
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPOSITORY: ${{ secrets.AWS_ECR_API_REPOSITORY }}
+          TAG: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [ -z "${KEYCLOAK_APP}" ]; then
-            echo "AZURE_KEYCLOAK_APP is not set; leaving the identity provider alone."
-            exit 0
-          fi
-          az containerapp update \
-            --name "${KEYCLOAK_APP}" \
-            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-            --image "${KEYCLOAK_IMAGE}:${{ github.sha }}" \
-            --output none
-          echo "Keycloak -> ${KEYCLOAK_IMAGE}:${{ github.sha }}"
+          # Two stages. The base image is the same one that runs locally and in
+          # the Kubernetes manifests; the Lambda image adds only the Web Adapter
+          # on top, so the deployed artefact and the local one cannot diverge in
+          # anything but packaging.
+          docker build -t transfer-intelligence:base .
+          docker build \
+            -f infrastructure/docker/lambda/Dockerfile \
+            --build-arg BASE_IMAGE=transfer-intelligence:base \
+            -t "$REGISTRY/$REPOSITORY:$TAG" \
+            -t "$REGISTRY/$REPOSITORY:latest" .
+          docker push "$REGISTRY/$REPOSITORY:$TAG"
+          docker push "$REGISTRY/$REPOSITORY:latest"
 
-      - name: Smoke test
+      - name: Build and push the Keycloak image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPOSITORY: ${{ secrets.AWS_ECR_KEYCLOAK_REPOSITORY }}
+          TAG: ${{ github.sha }}
         run: |
           set -euo pipefail
-          URL="https://$(az containerapp show \
-            --name "${{ secrets.AZURE_CONTAINER_APP }}" \
-            --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-            --query properties.configuration.ingress.fqdn -o tsv)"
+          # Realm and themes are baked in: EC2 has no bind mount from a laptop,
+          # so an image without them boots with no realm and authenticates
+          # nobody. Built on every push so the realm cannot drift from the code.
+          docker build \
+            -f infrastructure/docker/keycloak/Dockerfile \
+            -t "$REGISTRY/$REPOSITORY:$TAG" \
+            -t "$REGISTRY/$REPOSITORY:latest" .
+          docker push "$REGISTRY/$REPOSITORY:$TAG"
+          docker push "$REGISTRY/$REPOSITORY:latest"
 
-          # min_replicas is 0, so the first request after an idle period pays a
-          # cold start. Retry rather than calling that a failed deployment.
-          for attempt in $(seq 1 12); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$URL/health" || true)
-            # 401 is a PASS: the service is up and refusing an unauthenticated
-            # caller, which is the posture the deployment is supposed to have.
-            if [ "$code" = "200" ] || [ "$code" = "401" ]; then
-              echo "healthy after ${attempt} attempt(s): HTTP $code at $URL/health"
-              exit 0
-            fi
-            echo "attempt ${attempt}: HTTP ${code:-none}, waiting for cold start"
-            sleep 10
+      - name: Roll the Lambda functions
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPOSITORY: ${{ secrets.AWS_ECR_API_REPOSITORY }}
+          TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          IMAGE="$REGISTRY/$REPOSITORY:$TAG"
+          for fn in "${{ secrets.AWS_API_FUNCTION }}" "${{ secrets.AWS_REFRESH_FUNCTION }}"; do
+            [ -n "$fn" ] || continue
+            aws lambda update-function-code --function-name "$fn" --image-uri "$IMAGE" >/dev/null
+            # The next update is rejected while the previous one is in progress,
+            # so the two functions cannot be rolled back to back without this.
+            aws lambda wait function-updated --function-name "$fn"
+            echo "$fn -> $IMAGE"
           done
 
-          echo "::error::API did not become healthy at $URL/health"
+      - name: Smoke test
+        env:
+          API_URL: ${{ vars.AWS_API_URL }}
+        run: |
+          set -euo pipefail
+          [ -n "$API_URL" ] || { echo "AWS_API_URL not set; skipping"; exit 0; }
+          for attempt in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${API_URL%/}/healthz" || true)
+            # 200 means up. 503 means the function is running but cannot reach
+            # the warehouse, which is a different failure and worth surfacing.
+            if [ "$code" = "200" ]; then
+              echo "healthy after ${attempt} attempt(s)"
+              exit 0
+            fi
+            echo "attempt ${attempt}: HTTP ${code:-none}"
+            sleep 6
+          done
+          echo "::error::API did not become healthy at ${API_URL%/}/healthz"
           exit 1

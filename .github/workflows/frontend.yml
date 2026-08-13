@@ -1,17 +1,15 @@
 name: Frontend
 
-# Build the console and publish it to Azure Static Web Apps.
+# Build the console and publish it to S3 behind CloudFront.
 #
-# The console is a Vite SPA -- static files, no server runtime. That is why
-# Static Web Apps Free is the right host and why nothing here needs to scale or
-# wake up: the page paints immediately even while the API is cold-starting, and
-# the Free tier includes a managed certificate and 100 GB/month of bandwidth.
+# The console is a Vite SPA -- static files, no server runtime -- which is why
+# S3 + CloudFront is an exact fit rather than a compromise, and why it costs
+# nothing: CloudFront's always-free tier covers 1 TB out and 10M requests a
+# month.
 #
 # Everything under VITE_* is compiled into the bundle and is therefore PUBLIC.
-# Only values that are safe in a browser appear below: the API's own URL, the
-# Keycloak realm, and the public OIDC client id. No model key and no connection
-# string is a build input -- tests/web_checks.py asserts the built source holds
-# neither.
+# Only values safe in a browser appear below. tests/web_checks.py asserts the
+# built console carries no SQL, no credential and no metric definition.
 
 on:
   push:
@@ -28,6 +26,10 @@ concurrency:
   group: frontend-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -40,13 +42,9 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Install
-        run: npm ci
+      - run: npm ci
         working-directory: web
 
-      # Typecheck and build. What CI can prove cheaply is that the console
-      # compiles against the API types it claims to consume; it cannot prove a
-      # chart looks right, so it does not pretend to.
       - name: Typecheck and build
         working-directory: web
         env:
@@ -58,13 +56,12 @@ jobs:
           VITE_TRANSFEROPS_AUTH: ${{ vars.VITE_TRANSFEROPS_AUTH }}
         run: npm run build
 
-      # The console must not carry SQL, credentials, metric definitions or
-      # banding thresholds. Run on every frontend change, because that is
-      # exactly when someone is most tempted to compute a percentile in a
-      # component.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      # Run on every frontend change, because that is exactly when someone is
+      # most tempted to compute a percentile in a component.
       - name: Console isolation gate
         run: python tests/web_checks.py
 
@@ -76,69 +73,59 @@ jobs:
 
   deploy:
     needs: build
-    # Pull requests build and gate but do not publish. AZURE_DEPLOY_ENABLED is
-    # false when the tenant forbids the app registration CI would sign in with --
-    # publish from your machine instead: ./scripts/roll-deployment.sh
-    if: vars.AZURE_DEPLOY_ENABLED == 'true' && github.event_name != 'pull_request'
+    if: vars.AWS_DEPLOY_ENABLED == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production-demo
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: console
           path: dist
 
-      # Federated OIDC, no stored client secret. scripts/setup-github-actions.sh
-      # creates the app registration and the credential.
-      - name: Azure login
-        uses: azure/login@v2
+      - name: Assume the deployment role
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
 
-      # The console is served from the storage account's static website, so
-      # publishing is an upload into the $web container.
+      # Two passes, because the two kinds of file want opposite cache policies.
       #
-      # --auth-mode login is required, not preferred: the account has
-      # shared_access_key_enabled = false, so there is no account key to use.
-      # Uploads authenticate as the CI identity, which holds Storage Blob Data
-      # Contributor on this one account and nothing else.
-      - name: Publish the console
+      # Vite content-hashes every asset filename, so those are immutable and can
+      # be cached for a year. index.html is not hashed -- it is the file that
+      # names the new bundle -- so caching it is how a deploy appears to do
+      # nothing while the CDN keeps serving yesterday's app.
+      - name: Publish hashed assets
         run: |
           set -euo pipefail
-          az storage blob upload-batch \
-            --account-name "${{ secrets.AZURE_STORAGE_ACCOUNT }}" \
-            --auth-mode login \
-            --destination '$web' \
-            --source dist \
-            --overwrite \
-            --output none
-          echo "Uploaded $(find dist -type f | wc -l) files to \$web"
+          aws s3 sync dist "s3://${{ secrets.AWS_CONSOLE_BUCKET }}" \
+            --delete \
+            --exclude "index.html" \
+            --cache-control "public,max-age=31536000,immutable"
 
-      # Hashed asset filenames make the bundle safe to cache hard, but
-      # index.html must not be: a cached index keeps pointing at the previous
-      # bundle and the deploy appears to do nothing.
-      - name: Keep index.html uncacheable
+      - name: Publish index.html
         run: |
           set -euo pipefail
-          az storage blob update \
-            --account-name "${{ secrets.AZURE_STORAGE_ACCOUNT }}" \
-            --auth-mode login \
-            --container-name '$web' \
-            --name index.html \
-            --content-cache-control "no-cache, must-revalidate" \
-            --output none
+          aws s3 cp dist/index.html "s3://${{ secrets.AWS_CONSOLE_BUCKET }}/index.html" \
+            --cache-control "no-cache,must-revalidate"
+
+      # Only index.html needs invalidating; the hashed assets are new objects
+      # with new names. Invalidating /* would work and would also burn the free
+      # 1,000 paths a month faster than necessary.
+      - name: Invalidate the CDN
+        run: |
+          set -euo pipefail
+          ID=$(aws cloudfront create-invalidation \
+            --distribution-id "${{ secrets.AWS_CLOUDFRONT_DISTRIBUTION_ID }}" \
+            --paths "/index.html" \
+            --query Invalidation.Id --output text)
+          echo "invalidation $ID"
 
       - name: Smoke test
+        env:
+          CONSOLE_URL: ${{ vars.AWS_CONSOLE_URL }}
         run: |
           set -euo pipefail
-          URL="$(az storage account show \
-            --name "${{ secrets.AZURE_STORAGE_ACCOUNT }}" \
-            --query primaryEndpoints.web -o tsv)"
-          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$URL" || true)
-          [ "$code" = "200" ] || { echo "::error::console returned $code at $URL"; exit 1; }
-          echo "console live at $URL"
+          [ -n "$CONSOLE_URL" ] || { echo "AWS_CONSOLE_URL not set; skipping"; exit 0; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$CONSOLE_URL" || true)
+          [ "$code" = "200" ] || { echo "::error::console returned $code at $CONSOLE_URL"; exit 1; }
+          echo "console live at $CONSOLE_URL"
