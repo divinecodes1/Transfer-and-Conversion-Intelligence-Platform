@@ -127,7 +127,18 @@ jobs:
       # Auth posture, credential handling, dependency pinning, build context.
       # Runs with no TRANSFEROPS_AUTH set, because asserting the platform's own
       # default is half the point.
+      #
+      # The role passwords are blanked for this step alone. One of these checks
+      # asserts that loading a REMOTE warehouse refuses to fall back to a
+      # documented development credential -- and `role_password()` returns any
+      # supplied value before it ever looks at the host. With the job-level
+      # passwords in scope the remote case silently succeeds, so the assertion
+      # could never fail and never pass: it was testing nothing.
       - name: Security posture
+        env:
+          TRANSFEROPS_READER_PASSWORD: ""
+          TRANSFEROPS_AUDITOR_PASSWORD: ""
+          TRANSFEROPS_AI_PASSWORD: ""
         run: python tests/security_checks.py
 
       - name: Observability and audit

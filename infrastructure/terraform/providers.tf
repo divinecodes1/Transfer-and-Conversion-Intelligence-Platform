@@ -37,6 +37,11 @@ provider "azurerm" {
   # from a committed file.
   subscription_id = var.subscription_id
 
+  # Storage account keys are disabled below. Force Terraform's storage
+  # data-plane resources (containers and the static website) to use the same
+  # Azure CLI / Entra identity as Resource Manager.
+  storage_use_azuread = true
+
   features {
     resource_group {
       # A student subscription is a place where a half-deleted resource group

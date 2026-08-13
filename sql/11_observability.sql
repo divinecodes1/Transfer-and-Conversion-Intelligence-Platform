@@ -64,7 +64,13 @@ BEGIN
 END
 $$;
 
-ALTER ROLE transferops_auditor NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+DO $$
+BEGIN
+    IF (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
+        ALTER ROLE transferops_auditor NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+    END IF;
+END
+$$;
 
 GRANT USAGE ON SCHEMA tr_gov TO transferops_auditor, transferops_reader;
 GRANT INSERT, SELECT ON tr_gov.agent_audit TO transferops_auditor;

@@ -102,6 +102,17 @@ locals {
   # the application's own "is this configured?" checks would then see a
   # configured-but-blank issuer instead of an absent one.
   plain_env = { for k, v in var.env : k => v if v != "" }
+
+  # Keycloak's secrets, as a map for the same reason the API's are: a dynamic
+  # block's for_each wants an iterable collection, and a conditional tuple built
+  # from a sensitive variable is not one.
+  keycloak_secrets = merge(
+    {
+      "keycloak-admin-password" = var.keycloak_admin_password
+      "keycloak-db-password"    = var.secrets["db-admin-password"]
+    },
+    var.registry_password != "" ? { "registry-password" = var.registry_password } : {},
+  )
 }
 
 resource "azurerm_container_app_environment" "this" {
@@ -302,21 +313,19 @@ resource "azurerm_container_app" "keycloak" {
     }
   }
 
-  secret {
-    name  = "keycloak-admin-password"
-    value = var.keycloak_admin_password
-  }
-
-  secret {
-    name  = "keycloak-db-password"
-    value = var.secrets["db-admin-password"]
-  }
-
+  # Iterating a map rather than a conditional tuple.
+  #
+  # This was `for_each = var.registry_password != "" ? [1] : []`, and terraform
+  # validate rejected it: the ternary derives from a sensitive variable and
+  # unifies to a list of numbers, which is not accepted as a dynamic block's
+  # for_each. Building the set in locals keeps the *keys* ordinary strings and
+  # leaves the sensitivity on the values, which is the same shape the API app
+  # above already uses successfully.
   dynamic "secret" {
-    for_each = var.registry_password != "" ? [1] : []
+    for_each = local.keycloak_secrets
     content {
-      name  = "registry-password"
-      value = var.registry_password
+      name  = secret.key
+      value = secret.value
     }
   }
 

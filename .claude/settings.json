@@ -4,7 +4,8 @@
       "Bash(python -c ' *)",
       "PowerShell(docker exec transfer-and-conversion-intelligence-platform-postgres-1 psql -U app -d transferops -c \"SELECT r.username, r.role_code, e.dimension_type, e.dimension_value, e.valid_from, e.valid_to FROM tr_gov.user_role r LEFT JOIN tr_gov.data_entitlement e USING \\(username\\) ORDER BY r.username;\")",
       "Bash(grep -oE \"'[A-Z_]{6,}'\" sql/02_governance.sql)",
-      "Bash(grep -n \"to=\\\\\"/\\\\|label:\\\\|icon:\\\\|NAV\\\\|adminOnly\" web/src/components/shell.tsx)"
+      "Bash(grep -n \"to=\\\\\"/\\\\|label:\\\\|icon:\\\\|NAV\\\\|adminOnly\" web/src/components/shell.tsx)",
+      "Bash(gh run *)"
     ]
   }
 }

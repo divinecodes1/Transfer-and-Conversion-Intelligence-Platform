@@ -159,11 +159,11 @@ Secrets and variables → Actions → **Variables**:
 | `VITE_KEYCLOAK_CLIENT_ID` | `transferops-api` |
 | `VITE_TRANSFEROPS_AUTH` | `oidc` |
 
-And one **secret**:
+All of this is done for you by:
 
-| Secret | Value |
-|---|---|
-| `AZURE_STATIC_WEB_APPS_API_TOKEN` | `terraform output -raw static_web_app_deployment_token` |
+```bash
+./scripts/setup-github-actions.sh
+```
 
 Then push, or run the Frontend workflow manually.
 
@@ -200,23 +200,67 @@ that file to survive a reload.
 
 ## Continuous deployment
 
-Set these GitHub secrets for the `production-demo` environment:
+```bash
+./scripts/setup-github-actions.sh
+```
+
+One command. It creates the Entra app registration CI signs in as, adds the
+federated credentials, grants the roles, and pushes every secret and variable
+from `terraform output` — nothing is copied by hand.
+
+**No client secret is ever created.** GitHub mints a short-lived OIDC token for
+a specific repo, branch and environment; Entra trusts that instead of a
+password. There is no deployment credential to leak or rotate.
+
+### What it sets
+
+**Secrets** — private, never rendered into the browser bundle:
 
 | Secret | Purpose |
 |---|---|
-| `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` | federated OIDC login — no stored client secret |
-| `AZURE_RESOURCE_GROUP` / `AZURE_CONTAINER_APP` | deployment target |
-| `AZURE_STATIC_WEB_APPS_API_TOKEN` | console publishing |
+| `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` | federated OIDC login |
+| `AZURE_RESOURCE_GROUP` / `AZURE_CONTAINER_APP` | which app to roll |
+| `AZURE_STORAGE_ACCOUNT` | where the console is published |
+| `TRANSFEROPS_AI_API_KEY` | model key, optional — skip it to stay in mock mode |
 
-Federated credentials setup:
+**Variables** — compiled into the console bundle and therefore **public**. Only
+values safe to publish appear here; `tests/web_checks.py` asserts the built
+console carries no key and no connection string:
+
+| Variable | Source |
+|---|---|
+| `VITE_TRANSFEROPS_API` | `terraform output -raw api_url` |
+| `VITE_KEYCLOAK_URL` | `terraform output -raw keycloak_url` |
+| `VITE_KEYCLOAK_REALM` / `VITE_KEYCLOAK_CLIENT_ID` | `transferops` / `transferops-api` |
+| `VITE_TRANSFEROPS_AUTH` | `oidc` |
+| `BUDGET_ALERT_EMAIL` | read from `terraform.tfvars` |
+
+### Roles it grants
+
+Scoped to **this resource group only** — CI can redeploy this stack and touch
+nothing else in the subscription.
+
+| Role | Scope | Why |
+|---|---|---|
+| `Contributor` | resource group | roll the Container App to a new image |
+| `Storage Blob Data Contributor` | the storage account | the account has `shared_access_key_enabled = false`, so there is no key — uploads authenticate as this identity |
+
+`terraform apply` from CI needs more, because Contributor cannot create the role
+assignments Terraform makes. Either apply from your laptop, or:
 
 ```bash
-az ad app create --display-name "transfer-intelligence-ci"
-# then add a federated credential for repo:OWNER/REPO:environment:production-demo
+./scripts/setup-github-actions.sh --with-terraform
 ```
 
+which additionally grants `Role Based Access Control Administrator`.
+
+### Then
+
+Create the environment the deploy jobs declare — **GitHub → Settings →
+Environments → `production-demo`** — or the federated credential will not match.
+
 Push to `main` and the backend workflow tests, builds, pushes and rolls the
-Container App. Infrastructure changes only ever `plan` automatically — `apply`
+Container App. Infrastructure changes only ever `plan` automatically; `apply`
 requires a manual dispatch with a typed confirmation.
 
 ---

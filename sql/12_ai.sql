@@ -111,7 +111,13 @@ BEGIN
 END
 $$;
 
-ALTER ROLE transferops_ai NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+DO $$
+BEGIN
+    IF (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
+        ALTER ROLE transferops_ai NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+    END IF;
+END
+$$;
 
 GRANT USAGE ON SCHEMA tr_ai TO transferops_ai, transferops_reader;
 

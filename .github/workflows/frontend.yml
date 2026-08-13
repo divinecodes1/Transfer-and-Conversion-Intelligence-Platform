@@ -76,26 +76,67 @@ jobs:
 
   deploy:
     needs: build
-    # Pull requests build and gate but do not publish. A preview environment per
-    # PR is a Standard-tier feature and this deployment is on Free.
+    # Pull requests build and gate but do not publish.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production-demo
+    permissions:
+      id-token: write
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-
       - uses: actions/download-artifact@v4
         with:
           name: console
-          path: web/dist
+          path: dist
 
-      - name: Publish to Static Web Apps
-        uses: Azure/static-web-apps-deploy@v1
+      # Federated OIDC, no stored client secret. scripts/setup-github-actions.sh
+      # creates the app registration and the credential.
+      - name: Azure login
+        uses: azure/login@v2
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
-          action: upload
-          # Pre-built above, so the action uploads rather than building again in
-          # its own container with a different toolchain.
-          app_location: web/dist
-          skip_app_build: true
-          skip_api_build: true
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # The console is served from the storage account's static website, so
+      # publishing is an upload into the $web container.
+      #
+      # --auth-mode login is required, not preferred: the account has
+      # shared_access_key_enabled = false, so there is no account key to use.
+      # Uploads authenticate as the CI identity, which holds Storage Blob Data
+      # Contributor on this one account and nothing else.
+      - name: Publish the console
+        run: |
+          set -euo pipefail
+          az storage blob upload-batch \
+            --account-name "${{ secrets.AZURE_STORAGE_ACCOUNT }}" \
+            --auth-mode login \
+            --destination '$web' \
+            --source dist \
+            --overwrite \
+            --output none
+          echo "Uploaded $(find dist -type f | wc -l) files to \$web"
+
+      # Hashed asset filenames make the bundle safe to cache hard, but
+      # index.html must not be: a cached index keeps pointing at the previous
+      # bundle and the deploy appears to do nothing.
+      - name: Keep index.html uncacheable
+        run: |
+          set -euo pipefail
+          az storage blob update \
+            --account-name "${{ secrets.AZURE_STORAGE_ACCOUNT }}" \
+            --auth-mode login \
+            --container-name '$web' \
+            --name index.html \
+            --content-cache-control "no-cache, must-revalidate" \
+            --output none
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          URL="$(az storage account show \
+            --name "${{ secrets.AZURE_STORAGE_ACCOUNT }}" \
+            --query primaryEndpoints.web -o tsv)"
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$URL" || true)
+          [ "$code" = "200" ] || { echo "::error::console returned $code at $URL"; exit 1; }
+          echo "console live at $URL"

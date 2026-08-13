@@ -12,6 +12,10 @@
 # Environments and caches
 .venv*/
 venv/
+transfer-intelligence-platform/
+transfer-intelegence-platform/
+node_modules/
+dist/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -34,10 +38,24 @@ data/*.csv
 .gitignore
 .gitattributes
 .claude/
+.agents/
+.codex/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
 
 # Documentation and tests are not part of the runtime image
 docs/
 tests/
+web/
+infrastructure/
+azure/
+kubernetes/
+dags/
+fine_tuning/
+scripts/
+.runtime/
 *.md
 !README.md
 

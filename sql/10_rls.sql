@@ -76,7 +76,17 @@ BEGIN
 END
 $$;
 
-ALTER ROLE transferops_reader NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+-- Azure Database for PostgreSQL deliberately does not grant its administrator
+-- true SUPERUSER, so it may create roles but cannot alter SUPERUSER/BYPASSRLS
+-- attributes. New roles already default to all four privileges disabled. A
+-- self-hosted superuser still reasserts the hardening on every rebuild.
+DO $$
+BEGIN
+    IF (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
+        ALTER ROLE transferops_reader NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+    END IF;
+END
+$$;
 
 GRANT USAGE ON SCHEMA tr_core, tr_metric, tr_mart, tr_gov TO transferops_reader;
 GRANT SELECT ON ALL TABLES IN SCHEMA tr_core, tr_metric, tr_mart, tr_gov
