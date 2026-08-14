@@ -1,7 +1,7 @@
 # Transfer & Conversion Intelligence Platform
 
 A runnable, open-stack replica of the transfer-portfolio reporting platform
-described in the Infineon interview, rebuilt as a clean **six-layer architecture**
+a clean **six-layer architecture**
 with governed metrics and a golden-project reconciliation gate.
 
 Built to the modernisation spec: preserve schedule history explicitly, define each
