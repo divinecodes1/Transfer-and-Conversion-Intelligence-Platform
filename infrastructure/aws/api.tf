@@ -10,10 +10,12 @@
 # the container runs locally, so api/main.py has no handler, no Mangum import,
 # and tests/api_checks.py still drives the same ASGI app the deployment serves.
 #
-# A Function URL rather than API Gateway: HTTPS, a stable hostname, IAM or no
-# auth, and no per-request charge on top of Lambda's own. API Gateway would add
-# ~1 USD per million requests and a REST/HTTP API to configure, for features
-# (usage plans, request validation, custom domains) this demo does not use.
+# An API Gateway HTTP API rather than a Function URL, and not by preference:
+# this account refuses `lambda:InvokeFunctionUrl` for every caller. Anonymous
+# and SigV4-signed-by-CloudFront requests are both answered 403 while
+# `lambda:InvokeFunction` succeeds, so the block is on the action and no policy
+# or signature routes around it. HTTP APIs cost ~1 USD per million requests
+# with a 1M/month free tier, which is immaterial here. See api_ingress.tf.
 # ============================================================================
 
 resource "aws_cloudwatch_log_group" "api" {
@@ -38,10 +40,13 @@ resource "aws_iam_role" "api" {
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 }
 
-# Logs only. Note what is NOT attached: no VPC access (the function runs outside
-# the VPC on purpose), no broad S3, no ec2:*. The database credential arrives as
-# an environment variable resolved from SSM at deploy time, so the function needs
-# no runtime AWS permission to read it either.
+# Logs, plus the VPC access the managed policy grants: the API runs inside the
+# private subnets because RDS has no public ingress, and reaches the internet
+# through the EC2 NAT instance rather than a NAT Gateway.
+#
+# Note what is still NOT attached: no broad S3, no ec2:*, no ssm:*. The database
+# credential arrives as an environment variable resolved from SSM at deploy
+# time, so the function needs no runtime AWS permission to read it either.
 resource "aws_iam_role_policy_attachment" "api_logs" {
   role       = aws_iam_role.api.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
@@ -109,8 +114,10 @@ resource "aws_lambda_function" "api" {
 
   memory_size = var.api_memory_mb
   timeout     = var.api_timeout_seconds
-  # arm64 is roughly 20% cheaper per millisecond than x86_64 and the image is
-  # built for it. Free-tier seconds go further on the same architecture.
+  # x86_64, matching the image. arm64 would be roughly 20% cheaper per
+  # millisecond, but the build in scripts/deploy-aws-student.ps1 pins
+  # --platform linux/amd64; the two must agree or CreateFunction refuses the
+  # image, so changing one without the other is a broken deployment.
   architectures = ["x86_64"]
 
   environment {

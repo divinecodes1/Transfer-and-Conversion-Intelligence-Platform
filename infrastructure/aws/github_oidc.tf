@@ -202,6 +202,22 @@ data "aws_iam_policy_document" "github_deploy" {
     actions   = ["ssm:GetCommandInvocation", "ssm:ListCommandInvocations"]
     resources = ["*"]
   }
+
+  # CI resolves the Keycloak host by tag rather than being handed an instance
+  # id. Any change to the instance's user_data replaces it, and an id pinned in
+  # a repository secret then points at a terminated instance -- SendCommand
+  # fails with AccessDenied, because the statement above authorises the *new*
+  # instance while CI is asking about the old one. The error names IAM and the
+  # cause is a stale secret, which is an expensive half hour to diagnose.
+  #
+  # ec2:DescribeInstances does not support resource-level permissions, so "*"
+  # is the only expressible scope. It is read-only metadata and grants no
+  # ability to start, stop or connect to anything.
+  statement {
+    sid       = "ResolveKeycloakHost"
+    actions   = ["ec2:DescribeInstances"]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "github_deploy" {

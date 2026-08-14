@@ -38,6 +38,14 @@ output "keycloak_instance_id" {
   value       = aws_instance.keycloak.id
 }
 
+# CI resolves the host by this tag instead of pinning the id above. Changing
+# the instance's user_data replaces it, and an id published to a repository
+# secret then names a terminated instance; the Name tag survives the swap.
+output "keycloak_name_tag" {
+  description = "Name tag of the Keycloak/NAT host, stable across replacements."
+  value       = aws_instance.keycloak.tags["Name"]
+}
+
 output "database_endpoint" {
   value = aws_db_instance.main.address
 }

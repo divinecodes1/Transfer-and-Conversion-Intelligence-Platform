@@ -203,12 +203,51 @@ jobs:
           SCRIPT
           chmod +x "$RUNNER_TEMP/ssm-run.sh"
 
+      # Resolved by tag, not by a pinned id. Any change to the host's user_data
+      # replaces the instance, and an id published to a repository secret then
+      # names a terminated one. SendCommand fails with AccessDenied -- because
+      # the role is authorised for the *new* instance while CI asks about the
+      # old -- so the error names IAM and the cause is a stale secret.
+      #
+      # AWS_KEYCLOAK_INSTANCE remains the fallback so a repository configured
+      # before this step existed still deploys.
+      - name: Resolve the Keycloak host
+        id: host
+        env:
+          NAME_TAG: ${{ vars.AWS_KEYCLOAK_NAME_TAG }}
+          FALLBACK: ${{ secrets.AWS_KEYCLOAK_INSTANCE }}
+        run: |
+          set -euo pipefail
+          instance=""
+          if [ -n "${NAME_TAG:-}" ]; then
+            instance=$(aws ec2 describe-instances \
+              --filters "Name=tag:Name,Values=$NAME_TAG" \
+                        "Name=instance-state-name,Values=running" \
+              --query 'Reservations[].Instances[].InstanceId' --output text)
+          fi
+          # More than one match means an ambiguous target; refuse rather than
+          # roll a host at random.
+          count=$(printf '%s' "$instance" | wc -w)
+          if [ "$count" -gt 1 ]; then
+            echo "::error::tag '$NAME_TAG' matches $count running instances: $instance"
+            exit 1
+          fi
+          if [ -z "$instance" ]; then
+            echo "no running instance tagged '${NAME_TAG:-<unset>}'; using AWS_KEYCLOAK_INSTANCE"
+            instance="$FALLBACK"
+          fi
+          [ -n "$instance" ] || {
+            echo "::error::could not determine the Keycloak host. Re-run scripts/setup-github-actions.sh."
+            exit 1
+          }
+          echo "instance=$instance" >> "$GITHUB_OUTPUT"
+
       - name: Roll Keycloak through SSM
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           REPOSITORY: ${{ secrets.AWS_ECR_KEYCLOAK_REPOSITORY }}
           TAG: ${{ github.sha }}
-          INSTANCE: ${{ secrets.AWS_KEYCLOAK_INSTANCE }}
+          INSTANCE: ${{ steps.host.outputs.instance }}
           DOCUMENT: ${{ secrets.AWS_KEYCLOAK_ROLLOUT_DOCUMENT }}
           PUBLIC_URL: ${{ vars.AWS_KEYCLOAK_URL }}
         run: |
@@ -268,7 +307,7 @@ jobs:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           REPOSITORY: ${{ secrets.AWS_ECR_API_REPOSITORY }}
           TAG: ${{ github.sha }}
-          INSTANCE: ${{ secrets.AWS_KEYCLOAK_INSTANCE }}
+          INSTANCE: ${{ steps.host.outputs.instance }}
           DOCUMENT: ${{ secrets.AWS_WAREHOUSE_SEED_DOCUMENT }}
           # A reload drops the tr_gov entitlements. Naming the operator here
           # re-grants the demo account in the same command, so the console shows

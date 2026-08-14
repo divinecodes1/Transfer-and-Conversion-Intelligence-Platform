@@ -77,6 +77,7 @@ $ApiFunction = Get-Output 'api_function_name'
 $RefreshFunction = Get-Output 'refresh_function_name'
 $AssistantFunction = Get-Output 'assistant_function_name'
 $KeycloakInstance = Get-Output 'keycloak_instance_id'
+$KeycloakNameTag = Get-Output 'keycloak_name_tag'
 $RolloutDocument = Get-Output 'keycloak_rollout_document'
 $SeedDocument = Get-Output 'warehouse_seed_document'
 
@@ -136,6 +137,11 @@ Set-Var 'AWS_API_URL'       $ApiUrl
 Set-Var 'AWS_ASSISTANT_URL' $AssistantUrl
 Set-Var 'AWS_CONSOLE_URL'   $ConsoleUrl
 Set-Var 'AWS_KEYCLOAK_URL'  $KeycloakUrl
+
+# CI looks the host up by this tag. It is deliberately a variable rather than a
+# secret: it is not sensitive, and it must stay readable when someone is working
+# out why a deployment cannot find the instance.
+Set-Var 'AWS_KEYCLOAK_NAME_TAG' $KeycloakNameTag
 
 # Compiled into the bundle and therefore PUBLIC. Only values safe to publish
 # appear here; tests/web_checks.py asserts the built console holds no key.
