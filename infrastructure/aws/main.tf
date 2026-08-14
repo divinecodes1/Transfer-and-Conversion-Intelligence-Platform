@@ -55,6 +55,14 @@ resource "random_password" "db_ai" {
   special = false
 }
 
+# Authorises the scheduled refresh against POST /ai/refresh. Generated rather
+# than supplied: it is a shared secret between two things this stack owns, so
+# there is nobody to ask for a value and no reason to have one typed anywhere.
+resource "random_password" "ai_cron" {
+  length  = 40
+  special = false
+}
+
 resource "random_password" "keycloak_admin" {
   length  = 28
   special = false

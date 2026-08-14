@@ -67,6 +67,16 @@ resource "aws_ssm_parameter" "ai_api_key" {
   value       = var.ai_api_key
 }
 
+# Shared between the API, which verifies the signature, and the scheduled job,
+# which produces it. Stored so an operator can reproduce a signed call by hand
+# when diagnosing the nightly run.
+resource "aws_ssm_parameter" "ai_cron_secret" {
+  name        = "/${local.name}/ai-cron-secret"
+  description = "HMAC secret authorising POST /ai/refresh."
+  type        = "SecureString"
+  value       = random_password.ai_cron.result
+}
+
 # The loader DSN, so seed-demo-data.sh does not have to reassemble it from four
 # separate lookups and get the escaping wrong.
 resource "aws_ssm_parameter" "loader_dsn" {

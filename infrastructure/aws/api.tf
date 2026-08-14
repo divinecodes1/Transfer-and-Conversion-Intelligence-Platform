@@ -83,16 +83,19 @@ locals {
   # connection string or an auth setting.
   app_environment = merge(
     {
-      APP_ENV                      = var.environment
-      TRANSFEROPS_AUTH             = var.auth_mode
-      TRANSFEROPS_LOG_FORMAT       = "json"
-      TRANSFEROPS_LOG_LEVEL        = "INFO"
-      TRANSFEROPS_DSN              = local.dsn.admin
-      TRANSFEROPS_API_DSN          = local.dsn.reader
-      TRANSFEROPS_AUDIT_DSN        = local.dsn.auditor
-      TRANSFEROPS_AI_DSN           = local.dsn.ai
-      TRANSFEROPS_AI_PROVIDER      = var.ai_provider
-      TRANSFEROPS_AI_DAILY_CAP     = tostring(var.ai_daily_request_cap)
+      APP_ENV                  = var.environment
+      TRANSFEROPS_AUTH         = var.auth_mode
+      TRANSFEROPS_LOG_FORMAT   = "json"
+      TRANSFEROPS_LOG_LEVEL    = "INFO"
+      TRANSFEROPS_DSN          = local.dsn.admin
+      TRANSFEROPS_API_DSN      = local.dsn.reader
+      TRANSFEROPS_AUDIT_DSN    = local.dsn.auditor
+      TRANSFEROPS_AI_DSN       = local.dsn.ai
+      TRANSFEROPS_AI_PROVIDER  = var.ai_provider
+      TRANSFEROPS_AI_DAILY_CAP = tostring(var.ai_daily_request_cap)
+      # The API verifies this signature; the scheduled job produces it. Unset,
+      # POST /ai/refresh refuses everything rather than defaulting to open.
+      TRANSFEROPS_AI_CRON_SECRET   = random_password.ai_cron.result
       TRANSFEROPS_WEB_ORIGIN       = "https://${aws_cloudfront_distribution.console.domain_name}"
       KEYCLOAK_URL                 = "https://${aws_cloudfront_distribution.keycloak.domain_name}"
       KEYCLOAK_JWKS_URL            = "http://${aws_instance.keycloak.private_ip}:8080"
@@ -217,14 +220,26 @@ resource "aws_lambda_function" "refresh" {
   architectures = ["x86_64"]
 
   image_config {
-    # Overrides the Dockerfile CMD: run the refresh module instead of serving.
-    # In mock mode this still produces deterministic narratives, so the
+    # ai.trigger, not ai.refresh. The latter drives the API as an HTTP client
+    # under an identity asserted with X-Demo-User, which enforce mode refuses --
+    # so the scheduled job could never authenticate and failed every night,
+    # first with ConnectError against a default of 127.0.0.1 and then, once
+    # pointed at the real API, with 401.
+    #
+    # ai.trigger instead asks the API to refresh itself over its signed
+    # endpoint. Generation runs in-process through _LocalApi, so no token
+    # crosses a wire and no service account has standing access to governed
+    # data. In mock mode this still produces deterministic narratives, so the
     # scheduled-pipeline story holds with no model configured and no spend.
-    command = ["python", "-m", "ai.refresh", "--job", "all", "--trigger", "scheduled"]
+    command = ["python", "-m", "ai.trigger"]
   }
 
   environment {
-    variables = local.app_environment
+    # The gateway URL, because this job now talks to the API over HTTPS like any
+    # other caller rather than expecting one on localhost.
+    variables = merge(local.app_environment, {
+      TRANSFEROPS_API = aws_apigatewayv2_stage.api.invoke_url
+    })
   }
 
   vpc_config {
