@@ -134,6 +134,7 @@ resource "aws_instance" "keycloak" {
   user_data_replace_on_change = true
   user_data = templatefile("${path.module}/keycloak-user-data.sh.tftpl", {
     region         = var.region
+    private_cidrs  = join(" ", aws_subnet.private[*].cidr_block)
     registry       = split("/", data.aws_ecr_repository.keycloak.repository_url)[0]
     image          = "${data.aws_ecr_repository.keycloak.repository_url}:latest"
     parameter_path = "/${local.name}"

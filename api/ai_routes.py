@@ -22,6 +22,7 @@ deterministic assistant carry on untouched.
 import hashlib
 import hmac
 import inspect
+import logging
 import os
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -35,6 +36,7 @@ from ai.errors import AiError, AiUnavailable
 from . import db
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+log = logging.getLogger("transferops.ai")
 
 # The HMAC secret for the scheduled refresh endpoint. Unset means the endpoint
 # refuses every request rather than defaulting to open -- a cron trigger that
@@ -102,7 +104,14 @@ def _require_admin(request):
 
 def _handle(exc):
     """An AI failure, as an HTTP response the UI can show verbatim."""
-    raise HTTPException(status_code=getattr(exc, "status_code", 502),
+    status = getattr(exc, "status_code", 502)
+    log.warning("AI request failed", extra={
+        "provider": getattr(exc, "provider", None),
+        "error_type": type(exc).__name__,
+        "status": status,
+        "reason": str(exc),
+    })
+    raise HTTPException(status_code=status,
                         detail=str(exc))
 
 

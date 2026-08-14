@@ -3,6 +3,7 @@ set -euxo pipefail
 
 dnf update -y
 dnf install -y docker awscli iptables-services postgresql16 || dnf install -y docker awscli iptables-services postgresql15
+systemctl enable --now amazon-ssm-agent
 systemctl enable --now docker
 
 # Low-cost NAT instance for the private Lambda subnets. source_dest_check is
@@ -14,6 +15,19 @@ sysctl --system
 PRIMARY_IF="$(ip route show default | awk '{print $5; exit}')"
 iptables -t nat -C POSTROUTING -o "$PRIMARY_IF" -j MASQUERADE 2>/dev/null || \
   iptables -t nat -A POSTROUTING -o "$PRIMARY_IF" -j MASQUERADE
+
+# Docker deliberately defaults the host FORWARD policy to DROP. Masquerading
+# alone therefore rewrites packets but never lets them leave the instance. Add
+# explicit, stateful rules for only the Lambda subnets; insert them before
+# Docker's forwarding chains so a daemon restart cannot shadow them.
+for PRIVATE_CIDR in ${private_cidrs}; do
+  iptables -C FORWARD -s "$PRIVATE_CIDR" -o "$PRIMARY_IF" -j ACCEPT 2>/dev/null || \
+    iptables -I FORWARD 1 -s "$PRIVATE_CIDR" -o "$PRIMARY_IF" -j ACCEPT
+  iptables -C FORWARD -d "$PRIVATE_CIDR" -i "$PRIMARY_IF" \
+    -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || \
+    iptables -I FORWARD 1 -d "$PRIVATE_CIDR" -i "$PRIMARY_IF" \
+      -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+done
 service iptables save
 systemctl enable iptables
 

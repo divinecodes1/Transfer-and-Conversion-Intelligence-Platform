@@ -190,6 +190,27 @@ def _():
                          else "virtualenvs, .env, warehouses and .git all excluded")
 
 
+@check("the NAT instance permits stateful private-subnet forwarding")
+def _():
+    # MASQUERADE is not sufficient on a Docker host: Docker sets the FORWARD
+    # policy to DROP. Both directions must be explicitly allowed or VPC Lambda
+    # calls to external AI providers stall until API Gateway times out.
+    user_data = read("infrastructure", "aws", "keycloak-user-data.sh.tftpl")
+    keycloak_tf = read("infrastructure", "aws", "keycloak.tf")
+    required = [
+        "net.ipv4.ip_forward = 1",
+        "-t nat -C POSTROUTING",
+        '-C FORWARD -s "$PRIVATE_CIDR"',
+        "--ctstate ESTABLISHED,RELATED",
+        "systemctl enable --now amazon-ssm-agent",
+    ]
+    missing = [item for item in required if item not in user_data]
+    wired = 'private_cidrs  = join(" ", aws_subnet.private[*].cidr_block)' in keycloak_tf
+    return (not missing and wired,
+            f"missing={missing}, private CIDRs wired={wired}" if (missing or not wired)
+            else "masquerade, bidirectional forwarding and SSM startup configured")
+
+
 @check("no private key or credential file is committed")
 def _():
     import subprocess
