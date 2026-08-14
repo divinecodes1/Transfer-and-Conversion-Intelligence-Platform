@@ -165,10 +165,10 @@ resource "aws_lambda_function" "assistant" {
       # Through the gateway, like every other caller. The assistant forwards the
       # end user's Keycloak token, so it must reach the API by the same governed
       # path a browser does rather than by a privileged side door.
-      TRANSFEROPS_API              = aws_apigatewayv2_stage.api.invoke_url
-      TRANSFEROPS_WEB_ORIGIN       = "https://${aws_cloudfront_distribution.console.domain_name}"
-      TRANSFEROPS_AI_PROVIDER      = var.ai_provider
-      TRANSFEROPS_AI_DAILY_CAP     = tostring(var.ai_daily_request_cap)
+      TRANSFEROPS_API          = aws_apigatewayv2_stage.api.invoke_url
+      TRANSFEROPS_WEB_ORIGIN   = "https://${aws_cloudfront_distribution.console.domain_name}"
+      TRANSFEROPS_AI_PROVIDER  = var.ai_provider
+      TRANSFEROPS_AI_DAILY_CAP = tostring(var.ai_daily_request_cap)
       },
       var.ai_model != "" ? { TRANSFEROPS_AI_MODEL = var.ai_model } : {},
       var.ai_base_url != "" ? { TRANSFEROPS_AI_BASE_URL = var.ai_base_url } : {},
