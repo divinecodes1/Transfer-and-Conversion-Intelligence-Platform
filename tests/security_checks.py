@@ -108,6 +108,13 @@ def _():
     secret, body = "check-secret", b"{}"
     prev_secret, ai_routes.CRON_SECRET = ai_routes.CRON_SECRET, secret
 
+    # The route checks for a configured model before it checks the secret, so
+    # without this every case below answers 503 and the check passes or fails on
+    # whether the runner happens to have a provider set rather than on the thing
+    # it is asserting. mock needs no credential.
+    prev_provider = os.environ.get("TRANSFEROPS_AI_PROVIDER")
+    os.environ["TRANSFEROPS_AI_PROVIDER"] = "mock"
+
     # The job itself is replaced: this check is about who reaches it and with
     # what scope, and the real one wants a warehouse and a model.
     from ai import refresh as ai_refresh
@@ -146,6 +153,10 @@ def _():
     finally:
         ai_refresh.run_all = prev_run
         ai_routes.CRON_SECRET = prev_secret
+        if prev_provider is None:
+            os.environ.pop("TRANSFEROPS_AI_PROVIDER", None)
+        else:
+            os.environ["TRANSFEROPS_AI_PROVIDER"] = prev_provider
 
     ok = (set(refused.values()) == {401} and set(admitted.values()) == {200}
           and not reached_while_refused and reached == ["*", "*"])
