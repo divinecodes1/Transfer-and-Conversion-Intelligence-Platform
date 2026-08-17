@@ -41,7 +41,7 @@ and a test suite fails the build if the catalogue and the SQL ever disagree.
 
 Three documents, in the order a reviewer wants them:
 [Proposal](docs/PROPOSAL.md) (one page) ·
-[Architecture](docs/ARCHITECTURE.md) (two diagrams) ·
+[Architecture](docs/ARCHITECTURE.md) (logical, physical, security and delivery views) ·
 [Production readiness](docs/PRODUCTION.md) (what is hardened, and what is not)
 
 <details>
@@ -722,7 +722,8 @@ transfer-and-conversion-intelligence-platform/
 │   └── security_checks.py    # auth posture, credentials, pinning, build context
 ├── docs/
 │   ├── PROPOSAL.md           # the one-pager
-│   ├── ARCHITECTURE.md       # business + engineering diagrams, trust boundary
+│   ├── ARCHITECTURE.md       # seven views: logical, data model, AWS topology,
+│   │                         # request path, entitlement, pipelines, delivery
 │   ├── DEMO_RUNBOOK.md       # five minutes, minute by minute
 │   ├── PILOT.md              # the three-week plan
 │   ├── PRODUCTION.md         # what is hardened, and what still isn't
