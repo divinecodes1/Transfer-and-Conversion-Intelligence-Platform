@@ -215,29 +215,38 @@ resource "aws_lambda_function" "refresh" {
   package_type  = "Image"
   image_uri     = "${data.aws_ecr_repository.api.repository_url}:${var.api_image_tag}"
 
-  memory_size   = 512
-  timeout       = 300
+  memory_size = 512
+  # Fifteen minutes, the Lambda ceiling. A warm is one model call per narrative
+  # across seventeen scopes plus the risk batches, so the old 300s was a coin
+  # flip on a slow provider night -- and a job killed mid-run leaves rows in
+  # tr_ai.run_log stuck at 'running', which reads as a hang rather than a
+  # timeout.
+  timeout       = 900
   architectures = ["x86_64"]
 
-  image_config {
-    # ai.trigger, not ai.refresh. The latter drives the API as an HTTP client
-    # under an identity asserted with X-Demo-User, which enforce mode refuses --
-    # so the scheduled job could never authenticate and failed every night,
-    # first with ConnectError against a default of 127.0.0.1 and then, once
-    # pointed at the real API, with 401.
-    #
-    # ai.trigger instead asks the API to refresh itself over its signed
-    # endpoint. Generation runs in-process through _LocalApi, so no token
-    # crosses a wire and no service account has standing access to governed
-    # data. In mock mode this still produces deterministic narratives, so the
-    # scheduled-pipeline story holds with no model configured and no spend.
-    command = ["python", "-m", "ai.trigger"]
-  }
+  # No image_config: this function runs the SAME uvicorn command the API runs.
+  #
+  # Overriding the command with a batch process (`python -m ai.refresh`, then
+  # `python -m ai.trigger`) was the shape of the old bug. This image serves
+  # through the AWS Lambda Web Adapter, which answers the invocation by
+  # proxying it to a web server on AWS_LWA_PORT. Replace that server with a
+  # script and nothing is listening: the work may run as a side effect of the
+  # container starting, but the invocation itself is reported as a failure and
+  # retried, which is why the run log shows the same night four times over.
+  #
+  # So the schedule delivers an event instead, and the adapter's pass-through
+  # mode posts it to a real route. See aws_cloudwatch_event_target.nightly.
 
   environment {
-    # The gateway URL, because this job now talks to the API over HTTPS like any
-    # other caller rather than expecting one on localhost.
     variables = merge(local.app_environment, {
+      # Non-HTTP events (an EventBridge payload is one) are POSTed here rather
+      # than to the default /events. The whole refresh then runs in-process
+      # behind the governed route, exactly as an admin-triggered one does.
+      AWS_LWA_PASS_THROUGH_PATH = "/ai/refresh"
+
+      # For ai/trigger.py, which is still how an operator fires a refresh by
+      # hand. The schedule no longer uses it: a request through the gateway is
+      # cut off at 29s (api_ingress.tf) and this job takes minutes.
       TRANSFEROPS_API = aws_apigatewayv2_stage.api.invoke_url
     })
   }
@@ -264,6 +273,28 @@ resource "aws_cloudwatch_event_rule" "nightly" {
 resource "aws_cloudwatch_event_target" "nightly" {
   rule = aws_cloudwatch_event_rule.nightly.name
   arn  = aws_lambda_function.refresh.arn
+
+  # The request the adapter will make: POST /ai/refresh with this as the body.
+  #
+  # The secret travels in the payload rather than as an HMAC over it, because
+  # this constant is fixed at plan time and Terraform cannot compute an HMAC.
+  # Nothing is given up -- the endpoint compares it in constant time and
+  # possession of the secret is the authorisation either way -- and it never
+  # leaves AWS: EventBridge hands the payload straight to Lambda.
+  input = jsonencode({
+    job     = "all"
+    trigger = "scheduled"
+    key     = random_password.ai_cron.result
+  })
+}
+
+# Async invocations are retried twice by default, so a refresh that fails
+# halfway is a refresh that runs three times and bills for it. Once is the right
+# number here: the failure is recorded in tr_ai.run_log for the automation
+# screen, and tomorrow's schedule is the retry.
+resource "aws_lambda_function_event_invoke_config" "refresh" {
+  function_name          = aws_lambda_function.refresh.function_name
+  maximum_retry_attempts = 0
 }
 
 resource "aws_lambda_permission" "nightly" {

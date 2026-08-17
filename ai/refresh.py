@@ -136,6 +136,28 @@ def run_all(api, trigger="cron"):
             "jobs": [refresh_insights(api, trigger), refresh_risk(api, trigger)]}
 
 
+def local_api():
+    """
+    The governed API, in this process, over the whole portfolio.
+
+    The HTTP path (`bi.client.Api`) asserts an identity with `X-Demo-User`, which
+    `TRANSFEROPS_AUTH=enforce` refuses by design -- so on a real deployment it is
+    not a slower way to run this job, it is a 401. This reaches the same governed
+    route functions `POST /ai/refresh` reaches, through `api.ai_routes._LocalApi`:
+    still no SQL in `ai/`, still the provenance envelope, still a closed route
+    list. What it skips is the round trip and the identity assertion.
+
+    The scope is set here because no middleware ran to set it. It is the one
+    place in the job that widens what the database will return, which is why it
+    is a line in an entry point rather than a default anywhere.
+    """
+    from api import auth, db
+    from api.ai_routes import _LocalApi
+
+    db.CURRENT_SCOPE.set(auth.SCHEDULED_JOB.scope)
+    return _LocalApi()
+
+
 def main():
     """CLI entry point: `python -m ai.refresh`, and what the DAG task calls."""
     import argparse
@@ -148,12 +170,21 @@ def main():
         "TRANSFEROPS_AI_IDENTITY", "admin"),
         help="the identity the refresh runs as; its entitlements bound every "
              "scope it can warm")
+    parser.add_argument("--in-process", action="store_true",
+                        help="read through the governed routes in this process "
+                             "rather than over HTTP. Required wherever "
+                             "TRANSFEROPS_AUTH=enforce, which refuses the "
+                             "asserted identity the HTTP path relies on. "
+                             "Ignores --api and --identity.")
     parser.add_argument("--job", choices=["all", "insights", "risk"], default="all")
     parser.add_argument("--trigger", default="manual")
     args = parser.parse_args()
 
-    from bi.client import Api
-    api = Api(base_url=args.api, identity=args.identity)
+    if args.in_process:
+        api = local_api()
+    else:
+        from bi.client import Api
+        api = Api(base_url=args.api, identity=args.identity)
 
     if args.job == "insights":
         result = refresh_insights(api, args.trigger)

@@ -22,6 +22,7 @@ deterministic assistant carry on untouched.
 import hashlib
 import hmac
 import inspect
+import json
 import logging
 import os
 
@@ -33,7 +34,7 @@ from pydantic_core import PydanticUndefined
 from ai import gateway, snapshot as snap, store
 from ai.errors import AiError, AiUnavailable
 
-from . import db
+from . import auth, db
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 log = logging.getLogger("transferops.ai")
@@ -249,12 +250,20 @@ def ai_runs(request: Request, limit: int = Query(100, ge=1, le=500)):
 @router.post("/refresh")
 async def ai_refresh(request: Request, job: str = Query("all")):
     """
-    The scheduled refresh trigger, signature-verified.
+    The scheduled refresh trigger, secret-verified.
 
-    Called by cron, the DAG, or an admin. The signature is over the raw body with
-    a shared secret, compared in constant time; with no secret configured the
-    endpoint refuses everything rather than defaulting to open. That matters more
-    here than on a read endpoint -- this one spends money.
+    Called by the nightly schedule, the DAG, or an admin. With no secret
+    configured it refuses everything rather than defaulting to open -- that
+    matters more here than on a read endpoint, because this one spends money.
+
+    It carries no bearer token: there is no user behind it. The middleware admits
+    it unscoped for that reason (see api/main.py) and it reaches no data until the
+    secret checks out below.
+
+    `job` and `trigger` may arrive as a query parameter and a header, or as fields
+    in the JSON body. The body is what the scheduled path uses, because a Lambda
+    event delivered through the web adapter is a payload and nothing else -- there
+    is no query string to put them in.
     """
     _require_model()
     from ai import refresh
@@ -265,14 +274,45 @@ async def ai_refresh(request: Request, job: str = Query("all")):
             detail="TRANSFEROPS_AI_CRON_SECRET is not set; the refresh endpoint "
                    "is disabled rather than open.")
 
-    signature = request.headers.get("x-transferops-signature", "")
     body = await request.body()
+    payload = {}
+    if body:
+        try:
+            parsed = json.loads(body)
+        except ValueError:
+            parsed = None
+        payload = parsed if isinstance(parsed, dict) else {}
+
+    # Two ways to present the same secret, because the two callers cannot both
+    # use the same one.
+    #
+    # `ai/trigger.py` signs the exact bytes it is about to send, which is the
+    # stronger form -- the secret itself never leaves the caller.
+    #
+    # The scheduled EventBridge target cannot sign anything: its payload is a
+    # constant fixed at plan time and Terraform has no HMAC function, so it
+    # carries the secret in that constant instead. Nothing is given up by
+    # allowing it. In both cases possession of the secret is the authorisation,
+    # and both comparisons are constant-time.
+    signature = request.headers.get("x-transferops-signature", "")
     expected = hmac.new(CRON_SECRET.encode(), body, hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(signature, expected):
+    key = payload.get("key")
+    if not (hmac.compare_digest(signature, expected)
+            or (isinstance(key, str)
+                and hmac.compare_digest(key, CRON_SECRET))):
         raise HTTPException(status_code=401, detail="bad or missing signature")
 
+    # The secret is the authorisation, and it has now been checked. Until this
+    # line the request carried auth.UNVERIFIED_JOB and an empty scope, which
+    # reaches no rows; the warm covers the whole portfolio, so the scope widens
+    # here and nowhere earlier.
+    request.state.identity = auth.SCHEDULED_JOB
+    db.CURRENT_SCOPE.set(auth.SCHEDULED_JOB.scope)
+
     api = _LocalApi()
-    trigger = request.headers.get("x-transferops-trigger", "cron")
+    job = payload.get("job") or job
+    trigger = (payload.get("trigger")
+               or request.headers.get("x-transferops-trigger", "cron"))
     try:
         if job == "insights":
             return refresh.refresh_insights(api, trigger)

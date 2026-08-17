@@ -64,15 +64,28 @@ async def scope_requests(request: Request, call_next):
     request_id = logs.new_request_id(request.headers.get("x-request-id"))
     started = time.perf_counter()
 
-    try:
-        identity = auth.resolve(request)
-    except HTTPException as exc:
-        log.warning("request rejected", extra={
-            "path": request.url.path, "status": exc.status_code,
-            "reason": exc.detail})
-        return JSONResponse(status_code=exc.status_code,
-                            content={"detail": exc.detail},
-                            headers={"X-Request-ID": request_id})
+    # The scheduled refresh presents no bearer token, because there is no user
+    # behind it: it asks the API to refresh itself and proves that with an HMAC
+    # over the body, checked in ai_routes.ai_refresh. Demanding a token here
+    # rejects the signed request before the signature is ever read -- which is
+    # exactly what happened, every night, with nothing in tr_ai.run_log to show
+    # for it because the 401 landed before the job could open a run row.
+    #
+    # It is admitted *unscoped*. The row-level policy grants nothing on an empty
+    # scope, so an unsigned caller that reaches the route still reaches no rows;
+    # only the signature check elevates it.
+    if request.method == "POST" and request.url.path == "/ai/refresh":
+        identity = auth.UNVERIFIED_JOB
+    else:
+        try:
+            identity = auth.resolve(request)
+        except HTTPException as exc:
+            log.warning("request rejected", extra={
+                "path": request.url.path, "status": exc.status_code,
+                "reason": exc.detail})
+            return JSONResponse(status_code=exc.status_code,
+                                content={"detail": exc.detail},
+                                headers={"X-Request-ID": request_id})
     request.state.identity = identity
     db.CURRENT_SCOPE.set(identity.scope)
 

@@ -103,9 +103,16 @@ model configured — so the gate tests the platform rather than a provider's upt
   `tr_core`, `tr_metric` or `tr_mart`. Same argument as the auditor role, applied
   to the generator: a compromised AI layer writes a bad narrative and still
   cannot read a project row.
-- **The endpoint that spends money is signed.** `POST /ai/refresh` verifies an
-  HMAC against `TRANSFEROPS_AI_CRON_SECRET`, and refuses every request when the
-  secret is unset rather than defaulting to open.
+- **The endpoint that spends money proves it holds the secret.** `POST
+  /ai/refresh` accepts either an HMAC over the request body or the secret itself
+  in the payload — the first for callers that can sign (`ai/trigger.py`, the
+  DAG), the second for the nightly EventBridge target, whose payload is a
+  constant fixed at plan time. Both are compared against
+  `TRANSFEROPS_AI_CRON_SECRET` in constant time, and with the secret unset the
+  endpoint refuses every request rather than defaulting to open. It is the one
+  route exempt from the bearer-token requirement, because the job behind it is
+  not a user; it is admitted *unscoped* and reaches no rows until the secret
+  verifies.
 - **Failure is typed and per-scope.** `AiUnavailable` / `AiRateLimited` /
   `AiError` degrade differently, and one failing scope in the nightly refresh
   leaves the others warmed and lands in `tr_ai.run_log` with its error.

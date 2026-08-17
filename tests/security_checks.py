@@ -86,6 +86,73 @@ def _():
                             else f"{len(codes)} endpoints all 401")
 
 
+@check("the refresh endpoint is admitted unscoped, and only with the secret")
+def _():
+    # Two regressions in one check, from opposite directions.
+    #
+    # The endpoint is exempt from the bearer-token requirement because the job
+    # behind it is not a user -- and the exemption cost a nightly refresh that
+    # 401'd before its signature was ever read, silently, with nothing in the run
+    # log. So: a correct signature must get in.
+    #
+    # The other direction is the one that would matter more. Being admitted by
+    # the middleware must NOT be being authorised: an unsigned POST has to be
+    # refused by the route, and until the signature verifies the request must
+    # carry an empty scope, which the row-level policy answers with no rows.
+    import hashlib
+    import hmac
+    import json
+
+    from api import ai_routes, db
+
+    secret, body = "check-secret", b"{}"
+    prev_secret, ai_routes.CRON_SECRET = ai_routes.CRON_SECRET, secret
+
+    # The job itself is replaced: this check is about who reaches it and with
+    # what scope, and the real one wants a warehouse and a model.
+    from ai import refresh as ai_refresh
+    prev_run = ai_refresh.run_all
+    reached = []
+
+    def spy(api, trigger="cron"):
+        reached.append(db.CURRENT_SCOPE.get())
+        return {"status": "ok", "jobs": []}
+
+    ai_refresh.run_all = spy
+    try:
+        with with_auth("enforce") as c:
+            headers = {"content-type": "application/json"}
+            refused = {
+                "unsigned": c.post("/ai/refresh", content=body,
+                                   headers=headers).status_code,
+                "forged": c.post("/ai/refresh", content=body, headers={
+                    **headers, "x-transferops-signature": "00" * 32}).status_code,
+                # The scheduled path presents the secret in the payload; a wrong
+                # one must fail exactly as a wrong signature does.
+                "wrong key": c.post(
+                    "/ai/refresh", headers=headers,
+                    content=json.dumps({"key": "not-it"}).encode()).status_code,
+            }
+            reached_while_refused = list(reached)
+
+            signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+            admitted = {
+                "signature": c.post("/ai/refresh", content=body, headers={
+                    **headers, "x-transferops-signature": signature}).status_code,
+                "payload key": c.post(
+                    "/ai/refresh", headers=headers,
+                    content=json.dumps({"key": secret}).encode()).status_code,
+            }
+    finally:
+        ai_refresh.run_all = prev_run
+        ai_routes.CRON_SECRET = prev_secret
+
+    ok = (set(refused.values()) == {401} and set(admitted.values()) == {200}
+          and not reached_while_refused and reached == ["*", "*"])
+    return ok, (f"refused {refused}, admitted {admitted}; job reached with scope "
+                f"{reached!r} ({len(reached_while_refused)} unauthorised)")
+
+
 @check("the default posture is enforce -- security is never opt-in")
 def _():
     # A deployment that forgets to set TRANSFEROPS_AUTH must land in the safe

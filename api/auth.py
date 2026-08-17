@@ -102,6 +102,20 @@ class Identity:
 
 ADMIN = Identity("admin.demo", ["PLATFORM_ADMIN"], ["*"], ["*"], "demo-default")
 
+# The scheduled refresh, before and after its secret is checked.
+#
+# It carries no bearer token because there is no user behind it: the job asks the
+# API to refresh itself and proves it holds the shared secret. The middleware
+# admits it as UNVERIFIED_JOB, whose portfolio list is empty and whose scope
+# therefore reaches no rows under the row-level policy; ai_routes.ai_refresh
+# swaps in SCHEDULED_JOB only once that secret verifies.
+#
+# Two identities rather than one because the middleware runs before the secret is
+# read. An unsigned POST that gets past resolve() must still be unable to see a
+# project row, and it is -- the elevation happens after the check, not before it.
+UNVERIFIED_JOB = Identity("scheduled-refresh", [], [], [], "hmac-unverified")
+SCHEDULED_JOB = Identity("scheduled-refresh", ["PLATFORM_ADMIN"], ["*"], ["*"], "hmac")
+
 
 def entitlements_for(username):
     """Resolve roles and data scope from the governance tables."""
