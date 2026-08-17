@@ -69,6 +69,38 @@
   --spacing-space-10: 40px;
   --spacing-space-12: 48px;
 
+  /*
+   * The reading sizes.
+   *
+   * Tailwind's defaults put text-xs at 12px and text-sm at 14px, and this
+   * console had settled at text-xs for body copy -- roughly 120 uses against a
+   * dozen for text-base. Dense is not the same as small: an operator reads a
+   * failure reason and a project name here, not just scans figures, and 12px
+   * grey is where "information-dense" turns into "squinting".
+   *
+   * So the floor moves up one step and the leading opens with it. Sizes are
+   * redefined rather than swapped at 60 call sites, which is the same argument
+   * the spacing scale makes below: the scale is the thing that should carry the
+   * decision.
+   */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.45;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.55;
+  --text-base--line-height: 1.6;
+
+  /* The eyebrow: a section header in the sidebar, a column head, the label over
+     a KPI. It was written inline as text-[10px] or text-[11px] with tracking
+     between 0.08em and 0.14em, which is four legibility penalties at once --
+     small, uppercase, letterspaced and grey. One registered size instead, at
+     the 12px floor, with tracking wide enough to separate capitals and no
+     wider. Capitals are the reason it can stop at 12px: they have no
+     descenders to lose. */
+  --text-label: 0.75rem;
+  --text-label--line-height: 1.35;
+  --text-label--letter-spacing: 0.055em;
+  --text-label--font-weight: 600;
+
   /* The one type size the scale does not already cover: a KPI figure is meant
      to be read across a room, and text-3xl/4xl are display sizes tuned for
      headings rather than tabular numbers. */
@@ -114,15 +146,25 @@
   --card-foreground: #111111;
   --popover: #ffffff;
   --popover-foreground: #111111;
-  --primary: #0a8276;
+  /* Also a text colour -- links and the eyebrow on a tinted card -- so it is
+     held to the text floor rather than to the 3:1 a fill would need. #0a8276
+     managed 4.27 on the muted panel. */
+  --primary: #08786d;
   --primary-foreground: #ffffff;
   --secondary: #fafafa;
   --secondary-foreground: #4a4a4a;
   --muted: #f3f4f4;
-  --muted-foreground: #6b7280;
+  /* Every one of these clears 4.5:1 against the DARKEST surface it is used on,
+     not merely against white. That distinction is the whole point: this was
+     #6b7280, which passes on a white card at 4.83 and fails at 4.39 on the
+     muted panel and 4.48 on the AI brief -- and it is the most-used text colour
+     in the console, so most of the interface was reading below AA on exactly
+     the surfaces meant to hold secondary text. tests/web_checks.py now measures
+     this against every surface rather than trusting the swatch. */
+  --muted-foreground: #5e646d;
   --accent: #eaf5f3;
   --accent-foreground: #076b62;
-  --destructive: #d32f2f;
+  --destructive: #c62828;
   --destructive-foreground: #ffffff;
   --border: #e3e5e7;
   --input: #cdd1d5;
@@ -151,9 +193,13 @@
   --primary-200: #c7e5e1;
 
   /* Text ramp. Four steps, because a table needs a caption that recedes and a
-     disabled control that reads as unavailable rather than merely faint. */
+     disabled control that reads as unavailable rather than merely faint.
+     Disabled is the one step deliberately below the text floor -- it means
+     "you cannot use this" -- but it was at 2.45, which is not receding, it is
+     illegible. It now sits above 3:1 so it can still be read by someone who
+     needs to know what the control says. */
   --text-muted: #697078;
-  --text-disabled: #9a9ea3;
+  --text-disabled: #82868b;
 
   /* The heavier rule, for a control outline or a table's header underline
      where the hairline --border disappears. */
@@ -166,10 +212,13 @@
      tests/web_checks.py forbids. */
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.03);
 
-  /* Reserved status scale. Never used for a data series. */
+  /* Reserved status scale. Never used for a data series -- and, because these
+     appear as words ("Late", "Delayed") far more often than as fills, held to
+     the text floor. --warn was the amber that reads well on a chip and only
+     3.85 as a label on a grey panel. */
   --ok: #2e7d32;
-  --warn: #b26a00;
-  --bad: #d32f2f;
+  --warn: #9c5c00;
+  --bad: #c62828;
 
   /* Categorical series. */
   --chart-1: #0a8276;
@@ -180,7 +229,7 @@
 
   /* Diverging: schedule drift, where the sign is the whole point. */
   --diverging-neg: #2e7d32;
-  --diverging-pos: #d32f2f;
+  --diverging-pos: #c62828;
 
   /* Single-hue ordinal ramp: forecast horizons are ordered, not categorical. */
   --ordinal-1: #b9dfda;
@@ -205,7 +254,7 @@
   --muted-foreground: oklch(0.68 0.014 250);
   --accent: oklch(0.29 0.02 250);
   --accent-foreground: oklch(0.95 0.006 250);
-  --destructive: oklch(0.63 0.19 25);
+  --destructive: oklch(0.68 0.18 25);
   --destructive-foreground: oklch(0.97 0.01 250);
   --border: oklch(0.29 0.015 250);
   --input: oklch(0.27 0.015 250);
@@ -226,7 +275,8 @@
   --primary-200: oklch(0.34 0.04 200);
 
   --text-muted: oklch(0.68 0.014 250);
-  --text-disabled: oklch(0.52 0.012 250);
+  /* Same reasoning as the light theme: recedes, but stays readable. */
+  --text-disabled: oklch(0.62 0.012 250);
   --border-strong: oklch(0.38 0.017 250);
 
   /* Shadows do not read on a dark ground -- depth there comes from the surface
@@ -236,16 +286,16 @@
 
   --ok: oklch(0.76 0.15 160);
   --warn: oklch(0.81 0.15 80);
-  --bad: oklch(0.66 0.18 25);
+  --bad: oklch(0.7 0.18 25);
 
   --chart-1: oklch(0.78 0.14 190);
   --chart-2: oklch(0.76 0.15 160);
   --chart-3: oklch(0.81 0.15 80);
-  --chart-4: oklch(0.66 0.18 25);
+  --chart-4: oklch(0.7 0.18 25);
   --chart-5: oklch(0.7 0.1 265);
 
   --diverging-neg: oklch(0.76 0.15 160);
-  --diverging-pos: oklch(0.66 0.18 25);
+  --diverging-pos: oklch(0.7 0.18 25);
 
   --ordinal-1: oklch(0.86 0.06 220);
   --ordinal-2: oklch(0.76 0.1 215);

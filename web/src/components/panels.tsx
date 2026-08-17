@@ -266,7 +266,7 @@ export function KpiTile({
 
   return (
     <Card className="p-4">
-      <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+      <div className="text-label uppercase text-muted-foreground">
         {label}
       </div>
       {loading ? (

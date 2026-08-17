@@ -251,13 +251,34 @@ resource "aws_lambda_function" "refresh" {
       # attempt and falls back to a deterministic surface.
       #
       # The numbers come from what Groq's free tier actually reports: 8000
-      # tokens per minute, in a window that resets every minute. A nightly warm
-      # is roughly thirteen calls of a few thousand tokens each, so it does not
-      # fit in one window and never will -- the fix is to wait for the next one
-      # rather than to fail. Hence a 60s ceiling on the backoff: a full window.
-      # Retry-After still wins when the provider sends it.
+      # tokens per minute in a continuously refilling bucket, over a hard 200000
+      # per day. A nightly warm is roughly thirteen calls, so it cannot fit in
+      # one minute-window -- the fix is to wait for the next one rather than to
+      # fail. Hence a 60s ceiling on the backoff: one full window. Retry-After
+      # still wins when the provider sends it.
+      #
+      # Backoff cannot rescue the daily cap, and is not meant to: when the day's
+      # tokens are gone the provider asks for minutes, the job spends its
+      # attempts, records the scope as rate-limited and moves on. Tomorrow's
+      # schedule is the retry.
       TRANSFEROPS_AI_RETRY_ATTEMPTS = "4"
       TRANSFEROPS_AI_RETRY_MAX_WAIT = "60"
+
+      # The single biggest lever on both limits, and the least obvious.
+      #
+      # Groq bills the RESERVATION, not the usage: a three-word prompt sent with
+      # max_tokens=4000 is charged "Requested 4073" against the quota and
+      # refused when that does not fit. The platform default of 4000 is sized
+      # for the Copilot, where an answer may genuinely run long. A nightly
+      # briefing is about 250 words and a risk batch a few hundred tokens of
+      # JSON, so four fifths of every reservation here was being paid for
+      # nothing -- ~65000 tokens a night against a 200000 daily cap, most of it
+      # never generated.
+      #
+      # 2000 still leaves roughly four times the headroom either job has ever
+      # needed, so nothing truncates; it simply stops reserving what it will not
+      # use.
+      TRANSFEROPS_AI_MAX_TOKENS = "2000"
 
       # And it stops itself before the 900s ceiling does, leaving time to close
       # the run row. A process killed between start_run and finish_run leaves

@@ -354,7 +354,7 @@ function AnswerCard({ result }: { result: AskResult }) {
           An answer nobody can trace back is not usable for a decision. */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-xs uppercase tracking-wide text-muted-foreground">
+          <CardTitle className="text-label uppercase text-muted-foreground">
             How this was answered
           </CardTitle>
         </CardHeader>
@@ -382,7 +382,7 @@ function AnswerCard({ result }: { result: AskResult }) {
       {rows.length > 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-xs uppercase tracking-wide text-muted-foreground">
+            <CardTitle className="text-label uppercase text-muted-foreground">
               The data behind the answer
             </CardTitle>
           </CardHeader>
@@ -596,7 +596,7 @@ export function AiAssistant() {
             {turn.trace?.length ? (
               <div className="mt-2 flex flex-wrap gap-1 border-t border-border pt-1.5">
                 {turn.trace.map((step, stepIndex) => (
-                  <span key={stepIndex} className="num text-[10px] text-muted-foreground">
+                  <span key={stepIndex} className="num text-xs text-muted-foreground">
                     {step.tool}({step.rows})
                   </span>
                 ))}

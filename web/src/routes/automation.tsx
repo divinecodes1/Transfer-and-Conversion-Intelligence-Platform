@@ -158,7 +158,7 @@ export function AutomationScreen() {
                       run.detail
                     )}
                     {run.scopes?.length ? (
-                      <div className="mt-0.5 num text-[10px] opacity-70">
+                      <div className="mt-0.5 num text-xs opacity-70">
                         {run.scopes.slice(0, 4).join(" · ")}
                         {run.scopes.length > 4 ? ` +${run.scopes.length - 4}` : ""}
                       </div>

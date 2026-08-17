@@ -213,7 +213,7 @@ function UserMenu() {
           </span>
           <span className="hidden max-w-40 truncate text-left xl:block">
             <span className="block text-xs font-medium">{displayName}</span>
-            <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">
+            <span className="block text-label uppercase text-muted-foreground">
               {isAdmin ? "Administrator" : "Portfolio user"}
             </span>
           </span>
@@ -289,7 +289,7 @@ function GlobalSearch() {
         placeholder="Search transfers, projects, sites, technologies…"
         aria-label="Global search"
       />
-      <kbd className="pointer-events-none absolute right-2.5 top-2 rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-muted-foreground">
+      <kbd className="pointer-events-none absolute right-2.5 top-2 rounded border border-border bg-surface px-1.5 py-0.5 text-xs text-muted-foreground">
         Ctrl K
       </kbd>
     </form>
@@ -309,7 +309,7 @@ function AppHeader({ onMenu }: { onMenu: () => void }) {
           </span>
           <span>
             <span className="block text-sm font-semibold tracking-tight">Transfer Intelligence</span>
-            <span className="hidden text-[10px] uppercase tracking-[0.12em] text-muted-foreground 2xl:block">
+            <span className="hidden text-label uppercase text-muted-foreground 2xl:block">
               Operations intelligence
             </span>
           </span>
@@ -343,7 +343,7 @@ function SidebarSection({ section, pathname, onNavigate, isAdmin }: { section: N
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center justify-between px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground"
+        className="flex w-full items-center justify-between px-4 py-2 text-label uppercase text-muted-foreground hover:text-foreground"
         aria-expanded={open}
       >
         {section.label}
@@ -410,7 +410,7 @@ function AppSidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
             <SidebarSection key={section.label} section={section} pathname={pathname} onNavigate={onClose} isAdmin={isAdmin} />
           ))}
         </div>
-        <div className="border-t border-border p-4 text-[11px] leading-5 text-muted-foreground">
+        <div className="border-t border-border p-4 text-xs text-muted-foreground">
           <div className="flex items-center gap-2 font-medium text-foreground">
             <ShieldCheck className="size-3.5 text-primary" /> Governed workspace
           </div>

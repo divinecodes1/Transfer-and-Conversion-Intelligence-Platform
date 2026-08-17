@@ -238,7 +238,7 @@ export function NetworkScreen() {
 function LaneStat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div>
-      <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+      <div className="text-label uppercase text-muted-foreground">
         {label}
       </div>
       <div className="num mt-0.5 text-lg font-semibold">{value}</div>

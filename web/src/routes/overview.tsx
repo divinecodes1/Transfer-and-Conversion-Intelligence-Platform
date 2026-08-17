@@ -106,7 +106,7 @@ export function OverviewScreen() {
                     : "border-t border-border p-4 sm:border-l sm:border-t-0"
                 }
               >
-                <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-primary">
+                <div className="flex items-center gap-2 text-label uppercase text-primary">
                   <Icon className="size-3.5" /> {item.label}
                 </div>
                 <div className="mt-2 text-sm font-semibold">{item.value}</div>

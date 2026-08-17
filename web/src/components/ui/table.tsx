@@ -5,10 +5,14 @@ import { cn } from "@/lib/utils";
  * Every chart in this console ships with a table beside it, so no value is
  * reachable only by hovering. That rule is why this primitive exists at all.
  *
- * Geometry follows the portal spec: a 44px header, 48px rows, 14px body text,
- * horizontal rules only, and no zebra striping. Vertical borders and alternating
- * fills both add ink that carries no information — on a register of two hundred
- * transfers they turn a scan into a search.
+ * Geometry follows the portal spec: a 44px header, rows in the 48-56 band, and
+ * horizontal rules only, with no zebra striping. Vertical borders and
+ * alternating fills both add ink that carries no information — on a register of
+ * two hundred transfers they turn a scan into a search.
+ *
+ * Body text is `text-sm`, which the scale in styles.css sets to 15px. It was
+ * 14px, and a register that is read down a column all day is the last place to
+ * economise on x-height.
  */
 export const Table = React.forwardRef<
   HTMLTableElement,
@@ -81,7 +85,7 @@ export const TableHead = React.forwardRef<
     ref={ref}
     className={cn(
       "h-11 whitespace-nowrap px-3 text-left align-middle",
-      "text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground",
+      "text-label uppercase text-muted-foreground",
       // Pins to the top of the scroll container when the Table has a
       // maxHeight, and is inert otherwise. An opaque background is required:
       // without it the rows scroll visibly underneath the header text.
@@ -97,9 +101,10 @@ export const TableCell = React.forwardRef<
   HTMLTableCellElement,
   React.TdHTMLAttributes<HTMLTableCellElement>
 >(({ className, ...props }, ref) => (
-  // py-3.5 against a 20px line box gives a 48px row — the low end of the
-  // specified 48-56, chosen because these tables are read in long columns
-  // rather than skimmed a few rows at a time.
+  // py-3.5 against the 23px line box of 15px/1.55 text gives a ~52px row, which
+  // sits mid-band rather than at the 48px floor. The extra three pixels came
+  // from the type change, and are worth keeping: these tables are read down a
+  // long column rather than skimmed a few rows at a time.
   <td ref={ref} className={cn("px-3 py-3.5 align-middle", className)} {...props} />
 ));
 TableCell.displayName = "TableCell";

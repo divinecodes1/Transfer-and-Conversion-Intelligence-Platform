@@ -108,15 +108,15 @@ function LifecycleTimeline({ milestones }: { milestones: ProjectDetail["mileston
                   <div className={cn("mt-2 text-xs font-medium", current ? "text-warn" : "text-foreground")}>
                     {milestone.milestone_name}
                   </div>
-                  <div className="num mt-1 text-[10px] text-muted-foreground">
+                  <div className="num mt-1 text-xs text-muted-foreground">
                     Plan {fmtDate(milestone.planned_date)}
                   </div>
                   {complete ? (
-                    <div className="num text-[10px] text-ok">Actual {fmtDate(milestone.actual_date)}</div>
+                    <div className="num text-xs text-ok">Actual {fmtDate(milestone.actual_date)}</div>
                   ) : current ? (
-                    <div className="text-[10px] font-medium uppercase tracking-wide text-warn">Current</div>
+                    <div className="text-label uppercase text-warn">Current</div>
                   ) : (
-                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Upcoming</div>
+                    <div className="text-label uppercase text-muted-foreground">Upcoming</div>
                   )}
                 </li>
               );
