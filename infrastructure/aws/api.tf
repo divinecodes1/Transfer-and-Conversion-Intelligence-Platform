@@ -217,10 +217,11 @@ resource "aws_lambda_function" "refresh" {
 
   memory_size = 512
   # Fifteen minutes, the Lambda ceiling. A warm is one model call per narrative
-  # across seventeen scopes plus the risk batches, so the old 300s was a coin
-  # flip on a slow provider night -- and a job killed mid-run leaves rows in
-  # tr_ai.run_log stuck at 'running', which reads as a hang rather than a
-  # timeout.
+  # per scope plus the risk batches, and on a throttled tier most of that time
+  # is spent waiting for a token window rather than generating -- a measured run
+  # takes about 4 minutes. The old 300s was a coin flip, and a job killed
+  # mid-run leaves rows in tr_ai.run_log stuck at 'running', which reads as a
+  # hang rather than a timeout.
   timeout       = 900
   architectures = ["x86_64"]
 
@@ -244,19 +245,25 @@ resource "aws_lambda_function" "refresh" {
       # behind the governed route, exactly as an admin-triggered one does.
       AWS_LWA_PASS_THROUGH_PATH = "/ai/refresh"
 
-      # Only this function retries a throttled provider. It fires ~39 calls in a
-      # burst against a free tier that answers most of them 429, and there is
-      # nobody waiting on the result -- whereas a dashboard request that waits
-      # is worse than one that degrades, so the API keeps the default of one
-      # attempt. Worst case per call is about 45s.
-      TRANSFEROPS_AI_RETRY_ATTEMPTS = "3"
-      TRANSFEROPS_AI_RETRY_MAX_WAIT = "15"
+      # Only this function retries a throttled provider, because it is the only
+      # caller with nobody waiting on it. A dashboard request that waits is
+      # worse than one that degrades, so the API keeps the default of one
+      # attempt and falls back to a deterministic surface.
+      #
+      # The numbers come from what Groq's free tier actually reports: 8000
+      # tokens per minute, in a window that resets every minute. A nightly warm
+      # is roughly thirteen calls of a few thousand tokens each, so it does not
+      # fit in one window and never will -- the fix is to wait for the next one
+      # rather than to fail. Hence a 60s ceiling on the backoff: a full window.
+      # Retry-After still wins when the provider sends it.
+      TRANSFEROPS_AI_RETRY_ATTEMPTS = "4"
+      TRANSFEROPS_AI_RETRY_MAX_WAIT = "60"
 
       # And it stops itself before the 900s ceiling does, leaving time to close
       # the run row. A process killed between start_run and finish_run leaves
       # 'running' on the automation screen, which reads as a hang rather than a
       # slow night. The remainder covers the risk batches that follow.
-      TRANSFEROPS_AI_REFRESH_BUDGET = "550"
+      TRANSFEROPS_AI_REFRESH_BUDGET = "700"
 
       # For ai/trigger.py, which is still how an operator fires a refresh by
       # hand. The schedule no longer uses it: a request through the gateway is
