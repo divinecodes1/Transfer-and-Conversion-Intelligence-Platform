@@ -110,21 +110,27 @@ a frontier model is not worth its price for that.
 
 ---
 
-## Azure OpenAI
+## Microsoft Foundry / Azure OpenAI
 
 No separate adapter — the `openai` adapter is raw HTTP against any
 `/chat/completions` endpoint:
 
 ```bash
 TRANSFEROPS_AI_PROVIDER=openai
-TRANSFEROPS_AI_BASE_URL=https://<resource>.openai.azure.com/openai/deployments/<deployment>
+TRANSFEROPS_AI_BASE_URL=https://<resource>.openai.azure.com/openai/v1
 TRANSFEROPS_AI_MODEL=<deployment-name>
-TRANSFEROPS_AI_API_KEY=<azure-openai-key>
+TRANSFEROPS_AI_API_KEY=<foundry-resource-key>
 ```
 
-Availability and quota approval vary by subscription and region, and a student
-subscription frequently does not have access. Treat it as optional — the deploy
-scripts never assume it exists.
+Create the model deployment as Global Standard when regional processing is not
+required. `gpt-oss-120b` supports the Chat Completions, structured-output and
+function-calling shapes used by this gateway. Its deployment requires a Foundry
+project; the deployment name is what `TRANSFEROPS_AI_MODEL` carries.
+
+Availability, allowed regions and quota vary by subscription. Student credits
+cannot purchase partner Marketplace offers, so choose a model sold directly by
+Azure and confirm the subscription's spending limit. Treat Foundry as
+optional — the deploy scripts never assume it exists.
 
 ---
 

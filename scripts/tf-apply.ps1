@@ -20,7 +20,7 @@ This wrapper reads whatever is already in SSM and exports it before calling
 Terraform, so re-applying preserves what is deployed. An explicitly exported
 TF_VAR_ always wins, which is how a rotation is performed:
 
-    $env:TF_VAR_ai_api_key = "gsk_new"; .\scripts\tf-apply.ps1
+    $env:TF_VAR_ai_api_key = "<new-model-provider-key>"; .\scripts\tf-apply.ps1
 
 Any extra arguments are passed through to terraform, so `-target=...` and
 friends still work.

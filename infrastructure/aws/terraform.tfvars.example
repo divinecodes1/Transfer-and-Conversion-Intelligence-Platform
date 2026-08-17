@@ -33,7 +33,14 @@ github_repository = "divinecodes1/Transfer-and-Conversion-Intelligence-Platform"
 # still works. Similarity and delay risk never used a model at all.
 ai_provider = "mock"
 
-# Groq, or any OpenAI-compatible endpoint, reuses the openai adapter:
+# Microsoft Foundry's OpenAI v1 endpoint reuses the openai adapter. The model
+# value is the Foundry deployment name, not the catalogue model id:
+#   ai_provider = "openai"
+#   ai_model    = "gpt-oss-120b"
+#   ai_base_url = "https://<resource>.openai.azure.com/openai/v1"
+#   export TF_VAR_ai_api_key="your-foundry-resource-key"
+#
+# Groq, or any other OpenAI-compatible endpoint, uses the same adapter:
 #   ai_provider = "openai"
 #   ai_model    = "openai/gpt-oss-20b"
 #   ai_base_url = "https://api.groq.com/openai/v1"
