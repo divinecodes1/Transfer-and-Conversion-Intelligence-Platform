@@ -1,4 +1,4 @@
-/** Enterprise application chrome for Transfer Intelligence. */
+/** Enterprise application chrome for the Transfer & Conversion Intelligence Platform. */
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
@@ -303,14 +303,28 @@ function AppHeader({ onMenu }: { onMenu: () => void }) {
         <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenu} aria-label="Open navigation">
           <Menu />
         </Button>
-        <Link to="/" className="flex w-[224px] shrink-0 items-center gap-2.5">
-          <span className="grid size-8 place-items-center rounded-md bg-primary text-primary-foreground">
+        {/*
+          The wordmark is the product's full name on two lines, which is why the
+          second line is not responsive. It used to read "Transfer Intelligence"
+          over an "Operations intelligence" strapline that only appeared above
+          1536px -- so the header disagreed with the browser tab, and on any
+          narrower screen the product appeared to be called something shorter
+          than it is. A name is not a strapline: dropping half of it at a
+          breakpoint renames the product.
+
+          248px matches the sidebar, so the mark sits in the same column as the
+          navigation beneath it and the longer name has room to sit on one line.
+        */}
+        <Link to="/" className="flex w-[248px] shrink-0 items-center gap-2.5">
+          <span className="grid size-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground">
             <Activity className="size-5" />
           </span>
-          <span>
-            <span className="block text-sm font-semibold tracking-tight">Transfer Intelligence</span>
-            <span className="hidden text-label uppercase text-muted-foreground 2xl:block">
-              Operations intelligence
+          <span className="min-w-0 leading-tight">
+            <span className="block whitespace-nowrap text-sm font-semibold tracking-tight">
+              Transfer &amp; Conversion
+            </span>
+            <span className="block whitespace-nowrap text-label uppercase text-muted-foreground">
+              Intelligence Platform
             </span>
           </span>
         </Link>
