@@ -244,6 +244,20 @@ resource "aws_lambda_function" "refresh" {
       # behind the governed route, exactly as an admin-triggered one does.
       AWS_LWA_PASS_THROUGH_PATH = "/ai/refresh"
 
+      # Only this function retries a throttled provider. It fires ~39 calls in a
+      # burst against a free tier that answers most of them 429, and there is
+      # nobody waiting on the result -- whereas a dashboard request that waits
+      # is worse than one that degrades, so the API keeps the default of one
+      # attempt. Worst case per call is about 45s.
+      TRANSFEROPS_AI_RETRY_ATTEMPTS = "3"
+      TRANSFEROPS_AI_RETRY_MAX_WAIT = "15"
+
+      # And it stops itself before the 900s ceiling does, leaving time to close
+      # the run row. A process killed between start_run and finish_run leaves
+      # 'running' on the automation screen, which reads as a hang rather than a
+      # slow night. The remainder covers the risk batches that follow.
+      TRANSFEROPS_AI_REFRESH_BUDGET = "550"
+
       # For ai/trigger.py, which is still how an operator fires a refresh by
       # hand. The schedule no longer uses it: a request through the gateway is
       # cut off at 29s (api_ingress.tf) and this job takes minutes.

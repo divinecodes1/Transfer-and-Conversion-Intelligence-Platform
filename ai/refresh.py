@@ -42,6 +42,20 @@ WARM_KINDS = ("portfolio_overview", "report_summary")
 
 RISK_LIMIT = int(os.environ.get("TRANSFEROPS_AI_RISK_LIMIT", "60"))
 
+# Wall-clock budget for warming narratives; 0 means no bound.
+#
+# The job is a burst of calls against whatever quota the provider grants, and a
+# throttled night is slow rather than failed -- each call waits, retries, and
+# eventually succeeds or gives up. Without a bound the run is stopped by
+# something that does not know what it is interrupting: the Lambda timeout,
+# which kills the process between `start_run` and `finish_run` and leaves the
+# row at 'running' forever. On the automation screen that reads as a hang.
+#
+# So the job stops itself first, with time in hand to record what it warmed and
+# what it did not. Set below the platform's own ceiling -- see the refresh
+# function in infrastructure/aws/api.tf.
+BUDGET_SECONDS = float(os.environ.get("TRANSFEROPS_AI_REFRESH_BUDGET", "0"))
+
 
 def scopes(api):
     """
@@ -57,7 +71,15 @@ def scopes(api):
     except Exception:  # noqa: BLE001 -- an unreachable API is the caller's problem
         return out
     for portfolio in options.get("portfolio") or []:
-        out.append({"portfolio": portfolio})
+        # Each option is a {value, label} pair: the filter binds on the stable
+        # code, the dropdown shows the catalogue's display name. Passing the pair
+        # through whole put a dict where a portfolio code belongs, and it reached
+        # the driver as a query parameter -- "can't adapt type 'dict'", once per
+        # scope, every scope but the unfiltered one. A plain string is still
+        # accepted so a caller with a flat vocabulary is not broken by this.
+        code = portfolio.get("value") if isinstance(portfolio, dict) else portfolio
+        if code is not None:
+            out.append({"portfolio": code})
     return out
 
 
@@ -68,8 +90,16 @@ def refresh_insights(api, trigger="cron"):
     started = time.perf_counter()
     warmed, errors, touched = 0, [], []
 
+    stopped_early = None
     try:
-        for scope in scopes(api):
+        planned = scopes(api)
+        for index, scope in enumerate(planned):
+            if BUDGET_SECONDS and time.perf_counter() - started > BUDGET_SECONDS:
+                stopped_early = (f"stopped after {index} of {len(planned)} "
+                                 f"scope(s): the {BUDGET_SECONDS:.0f}s budget "
+                                 f"was spent, most likely waiting on a "
+                                 f"throttled provider")
+                break
             label = snap.describe_scope(scope)
             for kind in WARM_KINDS:
                 try:
@@ -86,9 +116,11 @@ def refresh_insights(api, trigger="cron"):
         raise
 
     status = "success" if not errors else ("failed" if warmed == 0 else "success")
+    detail = f"{warmed} narrative(s) across {len(planned)} scope(s)"
+    if stopped_early:
+        detail = f"{detail}; {stopped_early}"
     store.finish_run(
-        run_id, status, item_count=warmed, scopes=touched,
-        detail=f"{warmed} narrative(s) across {len(scopes(api))} scope(s)",
+        run_id, status, item_count=warmed, scopes=touched, detail=detail,
         error_message="; ".join(errors[:5]) or None)
     return {"job": "insight_refresh", "status": status, "warmed": warmed,
             "scopes": touched, "errors": errors,

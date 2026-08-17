@@ -89,8 +89,15 @@ class FakeApi:
             return {**envelope, "total_matching": len(self._projects),
                     "projects": self._projects}
         if path == "/mart/filter-options":
+            # {value, label} pairs, because that is what mart_filter_options
+            # returns. This double used to hand back bare strings, and the
+            # nightly refresh consequently fed a whole dict in where a portfolio
+            # code belongs -- invisible here, and every scope but the unfiltered
+            # one failed in the deployment with "can't adapt type 'dict'".
             return {"data_as_of": "2026-08-01",
-                    "options": {"portfolio": ["PF_AUTO", "PF_POWER"]}}
+                    "options": {"portfolio": [
+                        {"value": "PF_AUTO", "label": "Automotive"},
+                        {"value": "PF_POWER", "label": "Power"}]}}
         return {**envelope, "series": []}
 
 
@@ -198,6 +205,19 @@ def run():
     results.append(("in-process routes resolve FastAPI Query defaults",
                     captured == {"limit": 10, "offset": 0},
                     f"resolved {captured}"))
+
+    # The nightly warms one scope per portfolio, and a scope is a filter the
+    # governed routes will bind to a query parameter. It must therefore carry
+    # the portfolio *code*, never the {value, label} pair the vocabulary is
+    # published as -- the driver cannot adapt a dict, and the failure surfaces
+    # only in a deployment where the job actually runs.
+    from ai import refresh as ai_refresh
+    warmed = ai_refresh.scopes(FakeApi())
+    values = [s.get("portfolio") for s in warmed]
+    results.append(("the nightly warms one scope per portfolio, by code",
+                    warmed[0] == {} and values[1:] == ["PF_AUTO", "PF_POWER"]
+                    and all(isinstance(v, str) for v in values[1:]),
+                    f"scopes: {warmed}"))
 
     key_a = snapshot.scope_key("portfolio_overview", {"portfolio": "PF_AUTO"})
     key_b = snapshot.scope_key("portfolio_overview", {"portfolio": "PF_POWER"})

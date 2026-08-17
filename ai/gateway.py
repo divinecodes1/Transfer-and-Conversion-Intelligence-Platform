@@ -38,6 +38,7 @@ import json
 import os
 import re
 import threading
+import time
 
 from .errors import AiError, AiUnavailable, classify
 
@@ -70,6 +71,33 @@ CREDENTIAL_FREE = {"mock"}
 
 MAX_TOKENS = int(os.environ.get("TRANSFEROPS_AI_MAX_TOKENS", "4000"))
 TIMEOUT = float(os.environ.get("TRANSFEROPS_AI_TIMEOUT", "120"))
+
+# Retries against a throttled provider.
+#
+# One attempt by default, deliberately: on a dashboard request a model that
+# waits is worse than one that degrades, and every AI surface here has a
+# deterministic fallback to degrade to. The nightly refresh is the opposite case
+# -- dozens of calls in a burst against a free tier, and nobody waiting -- so
+# infrastructure/aws/api.tf raises these on the refresh function alone.
+RETRY_ATTEMPTS = max(1, int(os.environ.get("TRANSFEROPS_AI_RETRY_ATTEMPTS", "1")))
+RETRY_MAX_WAIT = float(os.environ.get("TRANSFEROPS_AI_RETRY_MAX_WAIT", "20"))
+
+
+def _retry_wait(response, attempt):
+    """
+    How long to wait before retrying a throttled call.
+
+    Honours `Retry-After` when the provider sends one: it knows when the window
+    reopens, and guessing wider than it says only spends the job's budget.
+    Otherwise exponential. Capped either way, so a provider asking for ten
+    minutes fails the scope rather than holding the whole run behind it.
+    """
+    header = (response.headers.get("retry-after") or "").strip()
+    try:
+        wait = float(header)
+    except ValueError:
+        wait = 2.0 ** attempt
+    return max(0.0, min(wait, RETRY_MAX_WAIT))
 
 
 def provider_name():
@@ -344,12 +372,21 @@ class _OpenAICompatible:
         if api_key():
             headers["Authorization"] = f"Bearer {api_key()}"
 
-        try:
-            response = httpx.post(f"{self._url}/chat/completions", json=payload,
-                                  headers=headers, timeout=TIMEOUT)
-        except Exception as exc:  # noqa: BLE001
-            raise AiError(f"Could not reach the AI provider: {exc}",
-                          provider=self.name)
+        for attempt in range(RETRY_ATTEMPTS):
+            try:
+                response = httpx.post(f"{self._url}/chat/completions",
+                                      json=payload, headers=headers,
+                                      timeout=TIMEOUT)
+            except Exception as exc:  # noqa: BLE001
+                raise AiError(f"Could not reach the AI provider: {exc}",
+                              provider=self.name)
+            # Only 429 is worth waiting on. A 402 is the same "not now" to the
+            # caller but no amount of backoff buys credit, and retrying a 400
+            # sends the same bad request again more slowly.
+            if response.status_code != 429 or attempt == RETRY_ATTEMPTS - 1:
+                break
+            time.sleep(_retry_wait(response, attempt))
+
         if response.status_code >= 400:
             raise classify(response.text, provider=self.name,
                            status=response.status_code)
