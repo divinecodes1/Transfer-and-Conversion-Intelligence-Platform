@@ -42,7 +42,7 @@ WARM_KINDS = ("portfolio_overview", "report_summary")
 
 RISK_LIMIT = int(os.environ.get("TRANSFEROPS_AI_RISK_LIMIT", "60"))
 
-# Wall-clock budget for warming narratives; 0 means no bound.
+# Wall-clock budget for the WHOLE run; 0 means no bound.
 #
 # The job is a burst of calls against whatever quota the provider grants, and a
 # throttled night is slow rather than failed -- each call waits, retries, and
@@ -54,7 +54,23 @@ RISK_LIMIT = int(os.environ.get("TRANSFEROPS_AI_RISK_LIMIT", "60"))
 # So the job stops itself first, with time in hand to record what it warmed and
 # what it did not. Set below the platform's own ceiling -- see the refresh
 # function in infrastructure/aws/api.tf.
+#
+# It is one deadline for the run, not one per job, and it is checked before
+# every model call. The first version of this was neither, and a throttled night
+# walked straight through it: `refresh_risk` started its own budget after
+# `refresh_insights` had spent the first, and the check sat between scopes while
+# the waiting happened inside them. The run was killed by the 900s ceiling at
+# 900706ms, which is the exact outcome the budget exists to prevent.
 BUDGET_SECONDS = float(os.environ.get("TRANSFEROPS_AI_REFRESH_BUDGET", "0"))
+
+
+def deadline_from_now():
+    """The moment this run must stop, or None when unbounded."""
+    return time.monotonic() + BUDGET_SECONDS if BUDGET_SECONDS else None
+
+
+def _spent(deadline):
+    return deadline is not None and time.monotonic() >= deadline
 
 
 def scopes(api):
@@ -83,25 +99,33 @@ def scopes(api):
     return out
 
 
-def refresh_insights(api, trigger="cron"):
+def refresh_insights(api, trigger="cron", deadline=None):
     """Warm the narrative cache for every scope. Returns the run summary."""
     run_id = store.start_run("insight_refresh", trigger,
                              gateway.model_name(), gateway.provider_name())
     started = time.perf_counter()
+    if deadline is None:
+        deadline = deadline_from_now()
     warmed, errors, touched = 0, [], []
 
     stopped_early = None
     try:
         planned = scopes(api)
         for index, scope in enumerate(planned):
-            if BUDGET_SECONDS and time.perf_counter() - started > BUDGET_SECONDS:
+            if _spent(deadline):
                 stopped_early = (f"stopped after {index} of {len(planned)} "
-                                 f"scope(s): the {BUDGET_SECONDS:.0f}s budget "
-                                 f"was spent, most likely waiting on a "
-                                 f"throttled provider")
+                                 f"scope(s): the run budget was spent, most "
+                                 f"likely waiting on a throttled provider")
                 break
             label = snap.describe_scope(scope)
             for kind in WARM_KINDS:
+                # Checked per call, not per scope: the waiting happens inside a
+                # scope, so a check only at the boundary can overshoot by a
+                # whole scope's worth of retries.
+                if _spent(deadline):
+                    stopped_early = (f"stopped inside scope {index + 1} of "
+                                     f"{len(planned)}: the run budget was spent")
+                    break
                 try:
                     store.save_insight(insights.generate(api, kind, scope))
                     warmed += 1
@@ -110,6 +134,8 @@ def refresh_insights(api, trigger="cron"):
                     errors.append(f"{kind} [{label}]: {exc}")
                 except Exception as exc:  # noqa: BLE001
                     errors.append(f"{kind} [{label}]: {type(exc).__name__}: {exc}")
+            if stopped_early:
+                break
     except Exception as exc:  # noqa: BLE001 -- record, then re-raise
         store.finish_run(run_id, "failed", item_count=warmed, scopes=touched,
                          error_message=f"{type(exc).__name__}: {exc}")
@@ -127,15 +153,17 @@ def refresh_insights(api, trigger="cron"):
             "duration_ms": int((time.perf_counter() - started) * 1000)}
 
 
-def refresh_risk(api, trigger="cron", limit=RISK_LIMIT):
+def refresh_risk(api, trigger="cron", limit=RISK_LIMIT, deadline=None):
     """Re-score in-flight projects against the current vintage."""
     run_id = store.start_run("risk_refresh", trigger,
                              gateway.model_name(), gateway.provider_name())
     started = time.perf_counter()
+    if deadline is None:
+        deadline = deadline_from_now()
 
     try:
         vintage = (api.get("/mart/kpis") or {}).get("data_as_of")
-        result = risk.score(api, limit=limit)
+        result = risk.score(api, limit=limit, deadline=deadline)
         stored = store.save_risk(result["scored"], data_as_of=vintage)
     except Exception as exc:  # noqa: BLE001 -- record, then re-raise
         store.finish_run(run_id, "failed",
@@ -144,9 +172,11 @@ def refresh_risk(api, trigger="cron", limit=RISK_LIMIT):
 
     errors = result.get("failures") or []
     status = "success" if stored else "failed"
+    detail = f"{stored} of {result['considered']} in-flight project(s) scored"
+    if result.get("stopped_early"):
+        detail = f"{detail}; {result['stopped_early']}"
     store.finish_run(
-        run_id, status, item_count=stored,
-        detail=f"{stored} of {result['considered']} in-flight project(s) scored",
+        run_id, status, item_count=stored, detail=detail,
         error_message="; ".join(errors[:5]) or None)
     return {"job": "risk_refresh", "status": status, "scored": stored,
             "considered": result["considered"], "errors": errors,
@@ -164,8 +194,12 @@ def run_all(api, trigger="cron"):
     if not gateway.configured():
         return {"status": "skipped",
                 "detail": "No model configured; nothing to refresh."}
+    # ONE deadline, shared. Given a budget each, the two jobs together can run
+    # to twice it, which is how a 700s bound produced a run killed at 900s.
+    deadline = deadline_from_now()
     return {"status": "ok",
-            "jobs": [refresh_insights(api, trigger), refresh_risk(api, trigger)]}
+            "jobs": [refresh_insights(api, trigger, deadline=deadline),
+                     refresh_risk(api, trigger, deadline=deadline)]}
 
 
 def local_api():

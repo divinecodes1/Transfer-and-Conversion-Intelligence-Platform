@@ -283,8 +283,17 @@ resource "aws_lambda_function" "refresh" {
       # And it stops itself before the 900s ceiling does, leaving time to close
       # the run row. A process killed between start_run and finish_run leaves
       # 'running' on the automation screen, which reads as a hang rather than a
-      # slow night. The remainder covers the risk batches that follow.
-      TRANSFEROPS_AI_REFRESH_BUDGET = "700"
+      # slow night.
+      #
+      # This is ONE budget for the whole run, checked before every model call.
+      # At 700 it was neither -- each job took the budget afresh and the check
+      # sat between scopes -- and the first real scheduled night walked past it
+      # and was killed by the ceiling at 900706ms.
+      #
+      # 650 leaves honest margin: the check can pass with a call about to start,
+      # and that call can spend its full retry allowance of 3 x 60s before
+      # returning, so the true worst case is 650 + 180 = 830 against 900.
+      TRANSFEROPS_AI_REFRESH_BUDGET = "650"
 
       # For ai/trigger.py, which is still how an operator fires a refresh by
       # hand. The schedule no longer uses it: a request through the gateway is

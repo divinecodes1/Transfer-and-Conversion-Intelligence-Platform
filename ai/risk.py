@@ -25,6 +25,8 @@ Batched deliberately small. One prompt for the whole portfolio is cheaper per
 project and worse at every one of them: quality degrades along a long list, and a
 single failure loses every score rather than twelve.
 """
+import time
+
 from . import gateway, prompts
 from .errors import AiError
 
@@ -125,23 +127,36 @@ def score_batch(projects):
     return rows
 
 
-def score(api, filters=None, limit=DEFAULT_LIMIT):
+def score(api, filters=None, limit=DEFAULT_LIMIT, deadline=None):
     """
     Score every in-flight project in scope, batch by batch.
 
     A failed batch does not fail the run: the projects it covered simply keep
     whatever score they had. A nightly job that abandons fifty good scores over
     one bad response is a job that quietly stops producing anything.
+
+    `deadline` is a `time.monotonic()` value after which no further batch is
+    started. On a throttled night each batch can sit in retry backoff for
+    minutes, and this loop used to have no bound at all -- so the whole run was
+    ended by the platform's timeout instead, mid-batch, with the run row left
+    open. Scores already produced are returned either way.
     """
     projects = in_flight(api, filters, limit)
     rows, failures = [], []
-    for start in range(0, len(projects), BATCH):
+    batches = range(0, len(projects), BATCH)
+    stopped_early = None
+    for index, start in enumerate(batches):
+        if deadline is not None and time.monotonic() >= deadline:
+            stopped_early = (f"stopped after {index} of {len(batches)} batch(es):"
+                             f" the run budget was spent")
+            break
         batch = projects[start:start + BATCH]
         try:
             rows.extend(score_batch(batch))
         except AiError as exc:
             failures.append(str(exc))
-    return {"scored": rows, "considered": len(projects), "failures": failures}
+    return {"scored": rows, "considered": len(projects), "failures": failures,
+            "stopped_early": stopped_early}
 
 
 def _plain(value):
